@@ -19,7 +19,7 @@
     1. window.__LABELING_CONFIG (config.js — generated at Vercel build time)
     2. fetch('./.env')           (local dev)
     3. localStorage              (DevTools paste)
-  See LABELING-STACK.md for the full picture.
+  See documents/LABELING-STACK.md for the full picture.
   ================================================================
 -->
 <html lang="en">
@@ -1166,6 +1166,10 @@
       const conn = await getConnection();
       const r = await conn.evaluatePreparedStatement(sql, params);
       return r.data ? r.data.toRows() : [];
+    }
+    if (typeof window !== "undefined") {
+      window.__evalQuery = evalQuery;
+      window.__evalPrepared = evalPrepared;
     }
 
     // =================================================================

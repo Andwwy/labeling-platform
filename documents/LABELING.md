@@ -7,10 +7,10 @@ rules-in-the-wild pipeline. It sits between two pipeline steps — extraction
 taxonomy) — and lets reviewers confirm, edit, or correct what the machine
 produced.
 
-v0.4 ships as a single-file static [`labeling-platform.html`](labeling-platform.html)
+v0.4 ships as a single-file static [`labeling-platform.html`](../labeling-platform.html)
 that talks directly to MotherDuck from the browser via `@motherduck/wasm-client`.
-See [LABELING-STACK.md](LABELING-STACK.md) for the stack and config notes, and
-[README.md](README.md) for Vercel deployment.
+See [LABELING-STACK.md](LABELING-STACK.md) for the stack, config, and Vercel
+deployment notes.
 
 ## What changed in v0.4
 
@@ -202,8 +202,8 @@ python3 -m http.server 8765
 
 The browser fetches `.env` on boot and connects to MotherDuck directly.
 See [LABELING-STACK.md](LABELING-STACK.md) for caveats — token in cleartext,
-wasm load time, ES modules require HTTP not `file://`. For deploying to
-Vercel see [README.md](README.md).
+wasm load time, ES modules require HTTP not `file://` — and for the
+Vercel deployment story.
 
 ## What the labeling platform does *not* do
 

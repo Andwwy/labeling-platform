@@ -1,7 +1,8 @@
-# OS / editor
+# OS / editor / tooling
 .DS_Store
 .idea
 .vscode
+.claude
 
 # Node
 /node_modules

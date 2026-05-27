@@ -1,12 +1,12 @@
 # Labeling Platform — Stack & Cautions (v0.4)
 
-A maintenance reference for [`labeling-platform.html`](labeling-platform.html),
+A maintenance reference for [`labeling-platform.html`](../labeling-platform.html),
 the single-file browser app that lets reviewers label rules-in-the-wild
 output directly against MotherDuck. If you need to change how it works —
 or you're trying to figure out why it broke — read this first.
 
 For end-user run instructions, see the comment block at the top of
-[`labeling-platform.html`](labeling-platform.html) itself. For the
+[`labeling-platform.html`](../labeling-platform.html) itself. For the
 functional contract (what each page does, what gets written when),
 read [`LABELING.md`](LABELING.md).
 
@@ -84,7 +84,7 @@ MOTHERDUCK_DATABASE=rules_in_the_wild
 ```
 
 `.env`, `.env.local`, `*.duckdb`, and `config.js` are all in
-[`.gitignore`](.gitignore). `.env.example` is the shared template — keep
+[`.gitignore`](../.gitignore). `.env.example` is the shared template — keep
 that in version control with `MOTHERDUCK_TOKEN=` blank.
 
 > **The static server has to serve `.env`.** `python3 -m http.server`
@@ -97,11 +97,27 @@ that in version control with `MOTHERDUCK_TOKEN=` blank.
 
 ## Deploying to Vercel (free tier)
 
-The high-level steps are in [README.md](README.md). This section covers the
-mechanics for engineers touching the build.
+Three steps end-to-end: push to GitHub → import on Vercel → set the env
+vars. The rest of this section explains the moving parts.
 
-[`vercel.json`](vercel.json) wires the repo as a static site with one build
-step — emitting `config.js`:
+```bash
+# 1. push to GitHub (confirm .env, config.js, *.duckdb are NOT in the diff)
+git init -b main
+git add -A
+git commit -m "Initial labeling platform"
+git remote add origin git@github.com:<you>/<repo>.git
+git push -u origin main
+
+# 2. import the repo at https://vercel.com/new
+#    framework preset: Other (Vercel auto-detects vercel.json)
+
+# 3. in Project Settings → Environment Variables, add MOTHERDUCK_TOKEN,
+#    MOTHERDUCK_DATABASE, LABELING_PASSWORD (scope: Production + Preview),
+#    then Deploy.
+```
+
+[`vercel.json`](../vercel.json) wires the repo as a static site with one
+build step — emitting `config.js`:
 
 ```json
 {
@@ -113,14 +129,14 @@ step — emitting `config.js`:
 }
 ```
 
-[`scripts/build-vercel-config.js`](scripts/build-vercel-config.js)
+[`scripts/build-vercel-config.js`](../scripts/build-vercel-config.js)
 reads `MOTHERDUCK_TOKEN` + `MOTHERDUCK_DATABASE` from `process.env`
 (set in Vercel **Project Settings → Environment Variables**) and
 writes `config.js` next to the HTML. That file populates
 `window.__LABELING_CONFIG` synchronously, so the module script's
 `loadConfig()` finds it on the first try without any `fetch('.env')`.
 
-[`middleware.js`](middleware.js) (Vercel Edge) gates every request behind
+[`middleware.js`](../middleware.js) (Vercel Edge) gates every request behind
 HTTP Basic Auth using `LABELING_PASSWORD`. The matcher excludes
 `_vercel` + `favicon.ico` so platform routes still work. The fallback
 password is `ritw` — override it in env vars.
