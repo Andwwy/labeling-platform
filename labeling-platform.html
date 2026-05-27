@@ -894,7 +894,24 @@
       font-size: 13px;
       font-weight: 600;
       padding: 10px 20px;
+      transition: background 120ms ease, border-color 120ms ease;
     }
+    .action-bar .save-btn.saving {
+      background: var(--fg-tertiary);
+      border-color: var(--fg-tertiary);
+      cursor: wait;
+    }
+    .action-bar .save-btn.success {
+      background: #2E7D32;
+      border-color: #2E7D32;
+      color: #FFFFFF;
+    }
+    .action-bar .save-btn.error {
+      background: #C62828;
+      border-color: #C62828;
+      color: #FFFFFF;
+    }
+    .action-bar .save-btn:disabled { opacity: 0.85; }
     .action-bar .skip-btn {
       background: var(--card);
       border: 1px solid var(--border-subtle);
@@ -934,12 +951,24 @@
       background: var(--surface-inverse);
       border-radius: 4px;
       bottom: 24px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
       color: var(--fg-inverse);
-      font-size: 12px;
-      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 10px 14px;
       position: fixed;
       right: 24px;
       z-index: 50;
+    }
+    .toast.success {
+      background: #2E7D32;
+      color: #FFFFFF;
+      border-left: 4px solid #66BB6A;
+    }
+    .toast.error {
+      background: #C62828;
+      color: #FFFFFF;
+      border-left: 4px solid #EF5350;
     }
     .boot-splash {
       align-items: center;
@@ -2073,7 +2102,15 @@
       const [search, setSearch] = useState("");
       const [selectedRuleId, setSelectedRuleId] = useState("");
       const [expanded, setExpanded] = useState({ PREREQUISITE: true, ENFORCEMENT: false, TRIGGERS: false, AMBIGUITY: false });
-      const [toast, setToast] = useState("");
+      const [toast, setToast] = useState(null);
+      const notify = useCallback((kind, msg) => setToast({ kind, msg, t: Date.now() }), []);
+      useEffect(() => {
+        if (!toast) return;
+        const id = setTimeout(() => {
+          setToast(cur => (cur && cur.t === toast.t ? null : cur));
+        }, toast.kind === "error" ? 5000 : 2500);
+        return () => clearTimeout(id);
+      }, [toast]);
 
       const loadItems = useCallback(async () => {
         try {
@@ -2081,8 +2118,8 @@
           setItems(next);
           setPredictions(preds);
           setSelectedRuleId(cur => cur || next[0]?.rule_id || "");
-        } catch (err) { setToast(`load failed: ${err.message ?? err}`); }
-      }, []);
+        } catch (err) { notify("error", `Load failed: ${err.message ?? err}`); }
+      }, [notify]);
 
       useEffect(() => { loadItems(); }, [loadItems]);
       usePolling(loadItems, POLL_INTERVAL_MS, []);
@@ -2169,10 +2206,10 @@
               setExpanded=${setExpanded}
               onAfterMutate=${loadItems}
               onAdvance=${advance}
-              setToast=${setToast}
+              notify=${notify}
             />` : html`<section className="class-main empty-state">No items.</section>`}
 
-          ${toast && html`<div className="toast">${toast}</div>`}
+          ${toast && html`<div className=${`toast ${toast.kind}`}>${toast.msg}</div>`}
         </main>
       `;
     }
@@ -2195,7 +2232,7 @@
       }));
     }
 
-    function ClassificationForm({ item, labelerId, predictions, expanded, setExpanded, onAfterMutate, onAdvance, setToast }) {
+    function ClassificationForm({ item, labelerId, predictions, expanded, setExpanded, onAfterMutate, onAdvance, notify }) {
       const myLabel = item.labels.find(l => l.labeler_id === labelerId);
       const codeSnippet = useMemo(
         () => pickHighlightedSnippet(item.document_text, item.line_start, item.line_end),
@@ -2228,12 +2265,22 @@
         setDraft(cur => ({ ...cur, AMBIGUITY_LEVEL: level }));
       }
 
+      // idle | saving | success | error — drives the Save button visual.
+      const [saveState, setSaveState] = useState("idle");
+      useEffect(() => {
+        if (saveState !== "success" && saveState !== "error") return;
+        const id = setTimeout(() => setSaveState("idle"), 1800);
+        return () => clearTimeout(id);
+      }, [saveState]);
+
       // "Save Classification" — commits every corrected_* axis from the
       // local draft, then sets decision = 'accept'. Done as sequential
       // putClassificationField calls (the proven per-field path) since
       // DuckDB-WASM's prepared statement binder doesn't like a single
       // UPDATE that mixes ?::JSON casts with VARCHAR placeholders.
       async function saveClassification() {
+        if (saveState === "saving") return;
+        setSaveState("saving");
         try {
           const ruleId = item.rule_id;
           await putClassificationField({ ruleId, labelerId, field: "corrected_prerequisites",          value: parseList(draft.PREREQUISITE), predictions });
@@ -2242,10 +2289,14 @@
           await putClassificationField({ ruleId, labelerId, field: "corrected_ambiguity_level",        value: draft.AMBIGUITY_LEVEL || null, predictions });
           await putClassificationField({ ruleId, labelerId, field: "corrected_ambiguity_notes",        value: draft.AMBIGUITY || null,       predictions });
           await putClassificationDecision({ ruleId, labelerId, decision: "accept", predictions });
-          setToast(`Saved classification (${item.rule_text.slice(0, 40)}…)`);
+          setSaveState("success");
+          notify("success", `Saved classification (${item.rule_text.slice(0, 40)}…)`);
           await onAfterMutate();
           onAdvance(1);
-        } catch (err) { setToast(`save failed: ${err.message ?? err}`); }
+        } catch (err) {
+          setSaveState("error");
+          notify("error", `Save failed: ${err.message ?? err}`);
+        }
       }
 
       // Skip — only writes the decision; does NOT persist draft edits.
@@ -2255,7 +2306,7 @@
           await putClassificationDecision({ ruleId: item.rule_id, labelerId, decision: "skip", predictions });
           await onAfterMutate();
           onAdvance(1);
-        } catch (err) { setToast(`skip failed: ${err.message ?? err}`); }
+        } catch (err) { notify("error", `Skip failed: ${err.message ?? err}`); }
       }
 
       const codeBodyRef = useRef(null);
@@ -2344,7 +2395,14 @@
           </div>
           <div className="action-bar">
             <button className="skip-btn" onClick=${skip}>Skip</button>
-            <button className="save-btn" onClick=${saveClassification}>Save Classification</button>
+            <button className=${`save-btn ${saveState}`}
+              disabled=${saveState === "saving"}
+              onClick=${saveClassification}>
+              ${saveState === "saving" ? "Saving…"
+                : saveState === "success" ? "Saved ✓"
+                : saveState === "error"   ? "Save failed ✕"
+                : "Save Classification"}
+            </button>
           </div>
         </section>
       `;
