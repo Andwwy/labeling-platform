@@ -1059,6 +1059,12 @@
       if (value === null || value === undefined) return null;
       if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
       if (Array.isArray(value)) return value.map(String);
+      // Arrow ListVector (from DuckDB-WASM VARCHAR[] columns).
+      if (typeof value.toJson === "function") {
+        const arr = value.toJson();
+        return Array.isArray(arr) ? arr.map(String) : null;
+      }
+      if (typeof value.toArray === "function") return Array.from(value.toArray()).map(String);
       return null;
     }
     function asListOr(value, fallback) {
@@ -1188,7 +1194,10 @@
     }
 
     async function listLabelers() {
-      const rows = await evalQuery(`SELECT id, handle, display_name FROM labeler ORDER BY handle`);
+      // labeler.id is UUID in prod. DuckDB-WASM returns UUID as
+      // { bytes: { 0..15 } } which doesn't round-trip back as a param —
+      // cast to VARCHAR on read. Same on every other UUID column.
+      const rows = await evalQuery(`SELECT id::VARCHAR AS id, handle, display_name FROM labeler ORDER BY handle`);
       return rows.map(r => ({ id: r.id, handle: r.handle, display_name: r.display_name ?? null }));
     }
 
@@ -1367,22 +1376,25 @@
       const rows = await evalPrepared(
         `
         SELECT
-          l.rule_id, l.labeler_id, le.handle, l.decision,
-          l.predicted_decision_id,
+          l.rule_id::VARCHAR    AS rule_id,
+          l.labeler_id::VARCHAR AS labeler_id,
+          le.handle,
+          l.decision::VARCHAR   AS decision,
+          l.predicted_decision_id::VARCHAR AS predicted_decision_id,
           l.predicted_prerequisites,
           l.predicted_enforcement_mechanisms,
           l.predicted_triggers,
-          l.predicted_ambiguity_level,
+          l.predicted_ambiguity_level::VARCHAR AS predicted_ambiguity_level,
           l.predicted_ambiguity_notes,
           l.corrected_prerequisites,
           l.corrected_enforcement_mechanisms,
           l.corrected_triggers,
-          l.corrected_ambiguity_level,
+          l.corrected_ambiguity_level::VARCHAR AS corrected_ambiguity_level,
           l.corrected_ambiguity_notes,
           l.created_at, l.updated_at
         FROM rule_classification_label l
         JOIN labeler le ON le.id = l.labeler_id
-        WHERE l.rule_id IN (${placeholders})
+        WHERE l.rule_id::VARCHAR IN (${placeholders})
         ORDER BY l.updated_at DESC
         `,
         ruleIds
@@ -1418,12 +1430,12 @@
     // =================================================================
     async function upsertLabeler(handle, displayName = null) {
       const existing = (await evalPrepared(
-        `SELECT id, handle, display_name FROM labeler WHERE handle = ?`, [handle]
+        `SELECT id::VARCHAR AS id, handle, display_name FROM labeler WHERE handle = ?`, [handle]
       ))[0];
       if (existing) return { id: existing.id, handle: existing.handle, display_name: existing.display_name };
       const id = crypto.randomUUID();
       await evalPrepared(
-        `INSERT INTO labeler (id, handle, display_name) VALUES (?, ?, ?)`,
+        `INSERT INTO labeler (id, handle, display_name) VALUES (?::UUID, ?, ?)`,
         [id, handle, displayName]
       );
       return { id, handle, display_name: displayName };
@@ -1473,49 +1485,57 @@
         [newId, ruleText, lineStart, lineEnd]
       );
       await evalPrepared(
-        `INSERT INTO rule_extraction_label (rule_id, labeler_id, decision) VALUES (?, ?, 'accept')`,
+        `INSERT INTO rule_extraction_label (rule_id, labeler_id, decision)
+         VALUES (?::UUID, ?::UUID, 'accept')`,
         [newId, labelerId]
       );
       return newId;
     }
 
     async function ensureClassificationRow({ ruleId, labelerId, predictions }) {
+      // Prod schema: rule_id, labeler_id, predicted_decision_id are UUID;
+      // predicted_prerequisites/_enforcement_mechanisms/_triggers are
+      // VARCHAR[]; predicted_ambiguity_level is ENUM; predicted_snapshot_hash
+      // is BLOB. Bindings use ?::UUID + from_json(?, '["VARCHAR"]') accordingly.
+      // We skip predicted_snapshot_hash (BLOB) for now — nullable, used only
+      // for future drift detection which the UI doesn't surface yet.
       const existing = (await evalPrepared(
-        `SELECT 1 FROM rule_classification_label WHERE rule_id = ? AND labeler_id = ?`,
+        `SELECT 1 FROM rule_classification_label
+         WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
         [ruleId, labelerId]
       ))[0];
       if (existing) return;
       const pred = predictions.get(ruleId);
       if (!pred) {
         await evalPrepared(
-          `INSERT INTO rule_classification_label (rule_id, labeler_id, decision) VALUES (?, ?, 'skip')`,
+          `INSERT INTO rule_classification_label (rule_id, labeler_id, decision)
+           VALUES (?::UUID, ?::UUID, 'skip')`,
           [ruleId, labelerId]
         );
         return;
       }
-      const snapshot = stableStringify({
-        prerequisites: pred.prerequisites,
-        enforcement_mechanisms: pred.enforcement_mechanisms,
-        triggers: pred.triggers,
-        ambiguity_level: pred.ambiguity_level,
-        ambiguity_notes: pred.ambiguity_notes,
-      });
-      const snapHash = await sha256Hex(snapshot);
       await evalPrepared(
         `INSERT INTO rule_classification_label (
             rule_id, labeler_id,
-            predicted_decision_id, predicted_snapshot_hash,
-            predicted_prerequisites, predicted_enforcement_mechanisms,
-            predicted_triggers, predicted_ambiguity_level, predicted_ambiguity_notes,
+            predicted_decision_id,
+            predicted_prerequisites, predicted_enforcement_mechanisms, predicted_triggers,
+            predicted_ambiguity_level, predicted_ambiguity_notes,
             decision
-         ) VALUES (?, ?, ?, ?, ?::JSON, ?::JSON, ?::JSON, ?, ?, 'skip')`,
+         ) VALUES (
+            ?::UUID, ?::UUID,
+            ?::UUID,
+            from_json(?, '["VARCHAR"]'), from_json(?, '["VARCHAR"]'), from_json(?, '["VARCHAR"]'),
+            ?, ?,
+            'skip'
+         )`,
         [
           ruleId, labelerId,
-          pred.decision_id, snapHash,
-          JSON.stringify(pred.prerequisites),
-          JSON.stringify(pred.enforcement_mechanisms),
-          JSON.stringify(pred.triggers),
-          pred.ambiguity_level, pred.ambiguity_notes,
+          pred.decision_id,
+          JSON.stringify(pred.prerequisites || []),
+          JSON.stringify(pred.enforcement_mechanisms || []),
+          JSON.stringify(pred.triggers || []),
+          pred.ambiguity_level || null,
+          pred.ambiguity_notes || null,
         ]
       );
     }
@@ -1524,7 +1544,7 @@
       await ensureClassificationRow({ ruleId, labelerId, predictions });
       await evalPrepared(
         `UPDATE rule_classification_label SET decision = ?, updated_at = now()
-         WHERE rule_id = ? AND labeler_id = ?`,
+         WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
         [decision, ruleId, labelerId]
       );
     }
@@ -1548,21 +1568,30 @@
       if (value === null || value === undefined) {
         await evalPrepared(
           `UPDATE rule_classification_label SET ${field} = NULL, updated_at = now()
-           WHERE rule_id = ? AND labeler_id = ?`,
+           WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
           [ruleId, labelerId]
         );
         return;
       }
-      // JSON columns accept VARCHAR input; DuckDB-WASM's binder dislikes the
-      // explicit ?::JSON cast for UPDATE prepared statements, so we just bind
-      // a JSON string for list-typed fields and a plain string otherwise.
-      const isJson = JSON_FIELDS.has(field);
-      const bound = isJson ? JSON.stringify(value) : value;
-      await evalPrepared(
-        `UPDATE rule_classification_label SET ${field} = ?, updated_at = now()
-         WHERE rule_id = ? AND labeler_id = ?`,
-        [bound, ruleId, labelerId]
-      );
+      // List-typed fields (corrected_prerequisites / _enforcement_mechanisms /
+      // _triggers) are VARCHAR[] in prod, not JSON. Use from_json(?, ...) to
+      // construct the array. Other fields (ambiguity_level enum, ambiguity_notes)
+      // are scalar; bind as-is.
+      const isList = JSON_FIELDS.has(field);
+      if (isList) {
+        await evalPrepared(
+          `UPDATE rule_classification_label
+             SET ${field} = from_json(?, '["VARCHAR"]'), updated_at = now()
+           WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
+          [JSON.stringify(value), ruleId, labelerId]
+        );
+      } else {
+        await evalPrepared(
+          `UPDATE rule_classification_label SET ${field} = ?, updated_at = now()
+           WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
+          [value, ruleId, labelerId]
+        );
+      }
     }
 
     // =================================================================
