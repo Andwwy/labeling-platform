@@ -1,0 +1,2391 @@
+<!DOCTYPE html>
+<!--
+  ================================================================
+  Rules Labeling — single-file static HTML app (v0.4 / UI-design.pen)
+  ================================================================
+
+  HOW TO RUN
+  ----------
+  ES modules don't work over file://, so this page won't open by
+  double-clicking. Serve the folder over HTTP and open it from there:
+
+      cd <folder-containing-this-file>
+      python3 -m http.server 8765
+      # then open http://localhost:8765/labeling-platform.html
+
+  CONFIG
+  ------
+  Three sources, tried in order:
+    1. window.__LABELING_CONFIG (config.js — generated at Vercel build time)
+    2. fetch('./.env')           (local dev)
+    3. localStorage              (DevTools paste)
+  See LABELING-STACK.md for the full picture.
+  ================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rules Labeling</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Funnel+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+
+  <script type="importmap">
+    {
+      "imports": {
+        "react":            "https://esm.sh/react@18.3.1",
+        "react-dom":        "https://esm.sh/react-dom@18.3.1",
+        "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+        "htm":              "https://esm.sh/htm@3.1.1",
+        "@motherduck/wasm-client": "https://cdn.jsdelivr.net/npm/@motherduck/wasm-client@1.5.2-r.3/+esm"
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      /* Surfaces */
+      --surface-primary: #F4F2EF;
+      --surface-inverse: #1A1A1A;
+      --card: #FFFFFF;
+
+      /* Foreground */
+      --fg-primary: #1A1A1A;
+      --fg-secondary: #4A4A4A;
+      --fg-tertiary: #7A7773;
+      --fg-inverse: #FFFFFF;
+
+      /* Borders */
+      --border-subtle: #EEECE8;
+      --border-strong: #CBCCC9;
+
+      /* Accent — gold */
+      --accent-gold: #C8B496;
+      --accent-gold-light: #F5EFE4;
+
+      /* Highlight */
+      --highlight-yellow: #FFF3C4;
+
+      /* Status badges */
+      --color-success: #DFE6E1;
+      --color-success-foreground: #004D1A;
+      --color-warning: #E9E3D8;
+      --color-warning-foreground: #804200;
+
+      /* Fonts */
+      --font-heading: 'Newsreader', Georgia, serif;
+      --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      --font-caption: 'Funnel Sans', 'Inter', sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+      color: var(--fg-primary);
+      background: var(--surface-primary);
+      font-family: var(--font-body);
+      font-size: 14px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+
+    button {
+      align-items: center;
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-primary);
+      cursor: pointer;
+      display: inline-flex;
+      gap: 0.4rem;
+      font-family: var(--font-body);
+      padding: 0.4rem 0.7rem;
+    }
+    button:hover { border-color: var(--accent-gold); }
+    button:disabled { cursor: not-allowed; opacity: 0.5; }
+    button.primary {
+      background: var(--accent-gold);
+      border-color: var(--accent-gold);
+      color: var(--fg-primary);
+    }
+    button.primary:hover { filter: brightness(0.97); }
+    .icon-btn {
+      width: 32px; height: 32px;
+      justify-content: center;
+      padding: 0;
+    }
+
+    /* ===== Layout shell ===== */
+    .app-shell {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface-primary);
+      overflow: hidden;
+    }
+
+    .topbar {
+      align-items: center;
+      background: var(--card);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 24px;
+      gap: 16px;
+    }
+    .topbar h1 {
+      font-family: var(--font-heading);
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0;
+    }
+    .topbar p {
+      color: var(--fg-secondary);
+      font-size: 12px;
+      margin: 2px 0 0;
+    }
+    .top-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .labeler-block {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      color: var(--fg-secondary);
+    }
+    .labeler-pill {
+      align-items: center;
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-primary);
+      display: inline-flex;
+      gap: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    .labeler-pill select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+      font-size: inherit;
+      outline: none;
+      padding: 0;
+    }
+    .labeler-pill select::-ms-expand { display: none; }
+    .add-handle-row {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .add-handle-row input {
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      padding: 6px 10px;
+      min-width: 12rem;
+    }
+
+    .tabs { display: flex; gap: 8px; }
+    .tab-btn {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-secondary);
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 0 16px;
+      height: 32px;
+    }
+    .tab-btn.active {
+      background: var(--accent-gold);
+      border-color: var(--accent-gold);
+      color: var(--fg-primary);
+      font-weight: 600;
+    }
+
+    /* ===== Workbench ===== */
+    .workbench {
+      flex: 1;
+      display: grid;
+      min-height: 0;
+    }
+    .workbench.extraction {
+      grid-template-columns: 300px 1fr 380px;
+    }
+    .workbench.classification {
+      grid-template-columns: 320px 1fr;
+    }
+
+    /* ===== Sidebar (shared shell) ===== */
+    .sidebar {
+      background: var(--card);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px 16px 12px;
+    }
+    .search-input {
+      align-items: center;
+      background: var(--surface-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      display: flex;
+      gap: 8px;
+      padding: 0 12px;
+      height: 36px;
+    }
+    .search-input input {
+      background: transparent;
+      border: 0;
+      flex: 1;
+      font-size: 13px;
+      outline: none;
+      padding: 0;
+    }
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dropdown-pill {
+      align-items: center;
+      background: var(--surface-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      display: inline-flex;
+      gap: 6px;
+      height: 32px;
+      padding: 0 10px;
+    }
+    .dropdown-pill select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      font-size: 13px;
+      outline: none;
+      padding: 0;
+      padding-right: 2px;
+    }
+    .dropdown-pill select::-ms-expand { display: none; }
+    .filter-row .count-label { margin-left: auto; }
+    .count-label {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 12px;
+    }
+    .sidebar-divider {
+      background: var(--border-subtle);
+      height: 1px;
+      width: 100%;
+    }
+    .sidebar-list {
+      flex: 1;
+      overflow: auto;
+      padding: 4px 8px;
+    }
+
+    /* ===== Extraction: file list ===== */
+    .file-item {
+      align-items: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+    .file-item:hover {
+      background: var(--surface-primary);
+    }
+    .file-item.active {
+      background: var(--accent-gold-light);
+    }
+    .file-item .filename {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .gh-icon {
+      color: var(--fg-tertiary);
+    }
+    .file-item.active .gh-icon { color: var(--accent-gold); }
+    .rule-count-badge {
+      background: var(--surface-primary);
+      border-radius: 4px;
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+    .file-item.active .rule-count-badge {
+      background: var(--accent-gold-light);
+      border: 1px solid var(--accent-gold);
+      color: var(--accent-gold);
+    }
+
+    /* ===== Code viewer ===== */
+    .viewer {
+      display: flex;
+      flex-direction: column;
+      background: var(--surface-primary);
+      overflow: hidden;
+    }
+    .viewer-header {
+      align-items: center;
+      background: var(--surface-primary);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+    }
+    .viewer-filename {
+      font-family: var(--font-heading);
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .breadcrumb {
+      color: var(--fg-secondary);
+      flex: 1;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .gh-btn {
+      align-items: center;
+      background: var(--surface-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-secondary);
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      gap: 6px;
+      padding: 6px 12px;
+      text-decoration: none;
+    }
+    .gh-btn:hover { border-color: var(--accent-gold); }
+    .viewer-body {
+      flex: 1;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      overflow: auto;
+      user-select: text;
+    }
+    .line-nums {
+      background: var(--surface-primary);
+      border-right: 1px solid var(--border-subtle);
+      padding: 12px 12px 12px 16px;
+      user-select: none;
+    }
+    .line-nums .ln {
+      color: var(--fg-tertiary);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      min-width: 24px;
+      text-align: right;
+    }
+    .code-content {
+      padding: 12px 16px;
+    }
+    .code-line {
+      font-size: 13px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      padding: 0 4px;
+      border-radius: 2px;
+    }
+    .code-line.highlight {
+      background: var(--highlight-yellow);
+    }
+    .status-bar {
+      align-items: center;
+      background: var(--surface-primary);
+      border-top: 1px solid var(--border-subtle);
+      color: var(--fg-secondary);
+      display: flex;
+      gap: 12px;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      padding: 8px 16px;
+    }
+    .status-bar .spacer { flex: 1; }
+    .status-bar .sel-info {
+      color: var(--accent-gold);
+      font-weight: 500;
+    }
+    .status-bar .divider {
+      color: var(--fg-tertiary);
+    }
+
+    /* ===== Rules panel (right on extraction) ===== */
+    .rules-panel {
+      background: var(--card);
+      border-left: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .rules-panel-header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 20px 24px 16px;
+    }
+    .rules-panel-header .header-top {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+    }
+    .rules-panel-header h2 {
+      font-family: var(--font-heading);
+      font-size: 20px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .rules-panel-header .header-meta {
+      align-items: center;
+      color: var(--fg-secondary);
+      display: flex;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      justify-content: space-between;
+      letter-spacing: 0.3px;
+    }
+    .add-rule-btn {
+      align-items: center;
+      background: var(--accent-gold);
+      border: 1px solid var(--accent-gold);
+      border-radius: 4px;
+      color: var(--fg-primary);
+      cursor: pointer;
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      font-weight: 500;
+      gap: 6px;
+      letter-spacing: 0.5px;
+      padding: 6px 12px;
+    }
+    .add-rule-btn:disabled {
+      background: var(--card);
+      border-color: var(--border-subtle);
+      color: var(--fg-tertiary);
+      cursor: not-allowed;
+    }
+    .add-confirm-banner {
+      background: var(--accent-gold-light);
+      border-bottom: 1px solid var(--accent-gold);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 16px;
+    }
+    .add-confirm-meta {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .add-confirm-text {
+      background: var(--card);
+      border: 1px solid var(--accent-gold);
+      border-radius: 4px;
+      color: var(--fg-primary);
+      font-size: 13px;
+      max-height: 8rem;
+      overflow: auto;
+      padding: 10px 12px;
+      white-space: pre-wrap;
+    }
+    .add-confirm-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .add-confirm-actions button.primary {
+      background: var(--accent-gold);
+      border-color: var(--accent-gold);
+    }
+    .rules-list {
+      flex: 1;
+      overflow: auto;
+    }
+    .rule-item {
+      border-bottom: 1px solid var(--border-subtle);
+      cursor: pointer;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .rule-item:hover { background: var(--surface-primary); }
+    .rule-item.expanded {
+      background: var(--highlight-yellow);
+      border-left: 3px solid var(--accent-gold);
+      padding-left: 13px;
+      cursor: default;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+    .rule-item-summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+    }
+    .rule-item-summary-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+    }
+    .rule-item-text {
+      color: var(--fg-primary);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .rule-item-meta {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      letter-spacing: 0.3px;
+    }
+    .rule-item.expanded .rule-item-summary {
+      width: 100%;
+      padding-bottom: 12px;
+    }
+    .rule-expanded-detail {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-bottom: 4px;
+    }
+    .rule-uuid-row {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+    }
+    .rule-uuid-label {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .rule-uuid-value {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      letter-spacing: 0.3px;
+    }
+    .rule-text-box {
+      background: var(--card);
+      border: 1px solid var(--accent-gold);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
+    }
+    .rule-text-box .caption {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .rule-text-box .rule-text-display {
+      color: var(--fg-primary);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .rule-text-box textarea,
+    .rule-text-box input[type="number"] {
+      background: transparent;
+      border: 1px dashed var(--border-strong);
+      border-radius: 4px;
+      font-size: 13px;
+      padding: 6px 8px;
+      width: 100%;
+      resize: vertical;
+    }
+    .rule-text-box .rule-lines-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .rule-actions-row {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    /* ===== Classification: sidebar list ===== */
+    .class-rule-item {
+      align-items: stretch;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px;
+      margin: 0 0 2px 0;
+      text-align: left;
+      width: 100%;
+    }
+    .class-rule-item:hover { background: var(--surface-primary); }
+    .class-rule-item.active {
+      background: var(--accent-gold-light);
+    }
+    .class-rule-item .text {
+      color: var(--fg-primary);
+      font-size: 13px;
+      text-align: left;
+    }
+    .class-rule-item .status-row {
+      align-items: center;
+      display: flex;
+      gap: 6px;
+      justify-content: flex-start;
+    }
+    .status-badge {
+      border-radius: 4px;
+      font-family: var(--font-caption);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 6px;
+    }
+    .status-badge.labeled {
+      background: var(--color-success);
+      color: var(--color-success-foreground);
+    }
+    .status-badge.unlabeled {
+      background: var(--color-warning);
+      color: var(--color-warning-foreground);
+    }
+    .class-rule-item .source-file {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 11px;
+    }
+
+    /* ===== Classification form ===== */
+    .class-main {
+      background: var(--surface-primary);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .class-top {
+      flex-shrink: 0;
+      padding: 24px 24px 0;
+    }
+    .class-axes-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 20px 24px 24px;
+    }
+    .code-section {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      height: 280px;
+      overflow: hidden;
+    }
+    .code-section-header {
+      align-items: center;
+      background: var(--surface-primary);
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--fg-secondary);
+      display: flex;
+      flex-shrink: 0;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      gap: 12px;
+      letter-spacing: 0.5px;
+      padding: 8px 16px;
+    }
+    .code-section-body {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 0;
+      overflow: auto;
+      padding: 12px 16px;
+    }
+    .code-section-line {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 16px;
+      padding: 2px 4px;
+      border-radius: 2px;
+    }
+    .code-section-line.highlight { background: var(--highlight-yellow); }
+    .code-section-line .ln {
+      color: var(--border-strong);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .code-section-line .lt {
+      color: var(--fg-secondary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .code-section-line.highlight .lt {
+      color: var(--fg-primary);
+      font-weight: 600;
+    }
+
+    .axis-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .axis-field {
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0 0 8px 0;
+    }
+    .axis-header {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      text-align: left;
+      width: 100%;
+    }
+    .axis-header-left {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+    .axis-label {
+      color: var(--fg-primary);
+      font-family: var(--font-caption);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .axis-summary-value {
+      color: var(--fg-secondary);
+      font-size: 11px;
+    }
+    .axis-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .axis-llm-box {
+      background: rgba(200, 180, 150, 0.06);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px;
+    }
+    .axis-llm-box .head {
+      color: var(--accent-gold);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .axis-llm-box .body {
+      color: var(--fg-primary);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .axis-notes-box {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px;
+    }
+    .axis-notes-box .head {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .axis-notes-box textarea,
+    .axis-notes-box select {
+      background: transparent;
+      border: 0;
+      color: var(--fg-primary);
+      font-family: var(--font-body);
+      font-size: 12px;
+      min-height: 48px;
+      outline: none;
+      padding: 0;
+      resize: vertical;
+      width: 100%;
+    }
+    .axis-notes-box select {
+      min-height: 0;
+      cursor: pointer;
+    }
+    .axis-notes-box textarea::placeholder {
+      color: var(--fg-tertiary);
+    }
+
+    .action-bar {
+      align-items: center;
+      background: var(--card);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      gap: 12px;
+      height: 60px;
+      justify-content: flex-end;
+      padding: 0 24px;
+    }
+    .action-bar .save-btn {
+      background: var(--accent-gold);
+      border: 1px solid var(--accent-gold);
+      border-radius: 4px;
+      color: var(--surface-inverse);
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+    }
+    .action-bar .skip-btn {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-secondary);
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 13px;
+      padding: 10px 20px;
+    }
+
+    /* ===== Toast / banner / boot ===== */
+    .empty-state {
+      align-items: center;
+      color: var(--fg-secondary);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      justify-content: center;
+      padding: 40px;
+      text-align: center;
+    }
+    .banner {
+      background: #FFF8E1;
+      border: 1px solid #FFC107;
+      color: #856404;
+      font-size: 13px;
+      margin: 8px 24px;
+      padding: 10px 14px;
+    }
+    .banner.error {
+      background: #FDECEA;
+      border-color: #EF5350;
+      color: #B71C1C;
+    }
+    .toast {
+      background: var(--surface-inverse);
+      border-radius: 4px;
+      bottom: 24px;
+      color: var(--fg-inverse);
+      font-size: 12px;
+      padding: 8px 12px;
+      position: fixed;
+      right: 24px;
+      z-index: 50;
+    }
+    .boot-splash {
+      align-items: center;
+      background: var(--surface-primary);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border-subtle);
+      border-top-color: var(--accent-gold);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Icons via lucide CSS classes — we ship inline SVG so no extra deps */
+    .icon { display: inline-block; vertical-align: middle; }
+
+    @media (max-width: 820px) {
+      .workbench.extraction, .workbench.classification { grid-template-columns: 1fr; }
+      .rules-panel { border-left: 0; border-top: 1px solid var(--border-subtle); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="boot-splash">
+      <div class="spinner"></div>
+      <div>Loading labeling app…</div>
+    </div>
+  </div>
+
+  <!-- Optional config.js (Vercel build artifact). Silent 404 locally. -->
+  <script src="./config.js"></script>
+
+  <script type="module">
+    import React, {
+      useState, useEffect, useMemo, useCallback, useContext,
+      createContext, useRef
+    } from "react";
+    import { createRoot } from "react-dom/client";
+    import htm from "htm";
+    import { MDConnection } from "@motherduck/wasm-client";
+
+    const html = htm.bind(React.createElement);
+
+    // =================================================================
+    // config — three-source loader
+    // =================================================================
+    const ENV_PATH = "./.env";
+    const LS_TOKEN_KEY = "labeling.motherduckToken";
+    const LS_DB_KEY = "labeling.motherduckDatabase";
+
+    function parseEnv(text) {
+      const out = {};
+      for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        const eq = line.indexOf("=");
+        if (eq < 0) continue;
+        const key = line.slice(0, eq).trim();
+        let value = line.slice(eq + 1).trim();
+        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+        else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
+        out[key] = value;
+      }
+      return out;
+    }
+    async function loadConfig() {
+      if (window.__LABELING_CONFIG?.MOTHERDUCK_TOKEN) {
+        return {
+          MOTHERDUCK_TOKEN: window.__LABELING_CONFIG.MOTHERDUCK_TOKEN,
+          MOTHERDUCK_DATABASE: window.__LABELING_CONFIG.MOTHERDUCK_DATABASE || "rules_in_the_wild",
+        };
+      }
+      try {
+        const resp = await fetch(ENV_PATH, { cache: "no-store" });
+        if (resp.ok) {
+          const env = parseEnv(await resp.text());
+          if (env.MOTHERDUCK_TOKEN) {
+            return {
+              MOTHERDUCK_TOKEN: env.MOTHERDUCK_TOKEN,
+              MOTHERDUCK_DATABASE: env.MOTHERDUCK_DATABASE || "rules_in_the_wild",
+            };
+          }
+        }
+      } catch {}
+      const lsToken = localStorage.getItem(LS_TOKEN_KEY);
+      if (lsToken) {
+        return {
+          MOTHERDUCK_TOKEN: lsToken,
+          MOTHERDUCK_DATABASE: localStorage.getItem(LS_DB_KEY) || "rules_in_the_wild",
+        };
+      }
+      return null;
+    }
+
+    // =================================================================
+    // hashing helpers
+    // =================================================================
+    async function sha256Hex(s) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+    function stableStringify(value) {
+      if (value === null || typeof value !== "object") return JSON.stringify(value);
+      if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]";
+      const keys = Object.keys(value).sort();
+      return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(value[k])).join(",") + "}";
+    }
+    function parseJsonField(value) {
+      if (value === null || value === undefined) return null;
+      if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
+      if (Array.isArray(value)) return value.map(String);
+      return null;
+    }
+    function asListOr(value, fallback) {
+      const p = parseJsonField(value);
+      return p === null ? fallback : p;
+    }
+
+    // =================================================================
+    // duckdb/schema — v0.4 DDL
+    // =================================================================
+    const LABELER_DDL = `
+      CREATE TABLE IF NOT EXISTS labeler (
+        id           VARCHAR PRIMARY KEY,
+        handle       VARCHAR NOT NULL UNIQUE,
+        display_name VARCHAR,
+        created_at   TIMESTAMP NOT NULL DEFAULT current_timestamp
+      )
+    `;
+    const RULE_EXTRACTION_LABEL_DDL = `
+      CREATE TABLE IF NOT EXISTS rule_extraction_label (
+        rule_id    VARCHAR NOT NULL,
+        labeler_id VARCHAR NOT NULL,
+        decision   VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        updated_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (rule_id, labeler_id)
+      )
+    `;
+    const RULE_CLASSIFICATION_LABEL_DDL = `
+      CREATE TABLE IF NOT EXISTS rule_classification_label (
+        rule_id                          VARCHAR NOT NULL,
+        labeler_id                       VARCHAR NOT NULL,
+        predicted_decision_id            VARCHAR,
+        predicted_snapshot_hash          VARCHAR,
+        decision                         VARCHAR NOT NULL DEFAULT 'skip',
+        predicted_prerequisites          JSON,
+        predicted_enforcement_mechanisms JSON,
+        predicted_triggers               JSON,
+        predicted_ambiguity_level        VARCHAR,
+        predicted_ambiguity_notes        VARCHAR,
+        corrected_prerequisites          JSON,
+        corrected_enforcement_mechanisms JSON,
+        corrected_triggers               JSON,
+        corrected_ambiguity_level        VARCHAR,
+        corrected_ambiguity_notes        VARCHAR,
+        created_at                       TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        updated_at                       TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (rule_id, labeler_id)
+      )
+    `;
+    const RULE_ORIGINAL_SNAPSHOT_DDL = `
+      CREATE TABLE IF NOT EXISTS rule_original_snapshot (
+        rule_id             VARCHAR PRIMARY KEY,
+        original_rule_text  VARCHAR NOT NULL,
+        original_line_start INTEGER NOT NULL,
+        original_line_end   INTEGER NOT NULL,
+        snapshotted_at      TIMESTAMP NOT NULL DEFAULT current_timestamp
+      )
+    `;
+    const RULE_EDIT_POINTER_DDL = `
+      CREATE TABLE IF NOT EXISTS rule_edit_pointer (
+        rule_id        VARCHAR PRIMARY KEY,
+        labeler_id     VARCHAR NOT NULL,
+        last_edited_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+      )
+    `;
+
+    // =================================================================
+    // duckdb/client
+    // =================================================================
+    let _appConfig = null;
+    let _connPromise = null;
+    function getConnection() {
+      if (_connPromise) return _connPromise;
+      _connPromise = (async () => {
+        if (!_appConfig) _appConfig = await loadConfig();
+        if (!_appConfig?.MOTHERDUCK_TOKEN) {
+          throw new Error(
+            "MotherDuck token not set. Copy .env.example to .env next to this HTML, " +
+            "paste your token (https://app.motherduck.com/settings/tokens), and reload."
+          );
+        }
+        const conn = MDConnection.create({ mdToken: _appConfig.MOTHERDUCK_TOKEN });
+        await conn.isInitialized();
+        await conn.evaluateQuery(`USE ${_appConfig.MOTHERDUCK_DATABASE}`);
+        for (const ddl of [
+          LABELER_DDL,
+          RULE_EXTRACTION_LABEL_DDL,
+          RULE_CLASSIFICATION_LABEL_DDL,
+          RULE_ORIGINAL_SNAPSHOT_DDL,
+          RULE_EDIT_POINTER_DDL,
+        ]) {
+          await conn.evaluateQuery(ddl);
+        }
+        return conn;
+      })().catch(err => { _connPromise = null; throw err; });
+      return _connPromise;
+    }
+    async function evalQuery(sql) {
+      const conn = await getConnection();
+      const r = await conn.evaluateQuery(sql);
+      return r.data ? r.data.toRows() : [];
+    }
+    async function evalPrepared(sql, params) {
+      const conn = await getConnection();
+      const r = await conn.evaluatePreparedStatement(sql, params);
+      return r.data ? r.data.toRows() : [];
+    }
+
+    // =================================================================
+    // duckdb/queries
+    // =================================================================
+    function githubBlobUrl(canonical, commitSha, path) {
+      if (!canonical || !path) return null;
+      const base = canonical.replace(/\/+$/, "");
+      const ref = commitSha || "HEAD";
+      return `${base}/blob/${ref}/${path.replace(/^\/+/, "")}`;
+    }
+    function githubRepoLabel(canonical, path) {
+      if (!canonical) return path || "";
+      const tail = canonical.replace(/^https?:\/\//, "").replace(/\.git$/, "");
+      return path ? `${tail} / ${path}` : tail;
+    }
+
+    async function listLabelers() {
+      const rows = await evalQuery(`SELECT id, handle, display_name FROM labeler ORDER BY handle`);
+      return rows.map(r => ({ id: r.id, handle: r.handle, display_name: r.display_name ?? null }));
+    }
+
+    async function listDocuments() {
+      const rows = await evalQuery(`
+        SELECT
+          f.id::VARCHAR                                              AS document_id,
+          f.path                                                     AS source_path,
+          COALESCE(p.owner || '/' || p.name || ':' || f.path, f.path) AS document_name,
+          p.canonical_url                                            AS canonical_url,
+          f.commit_sha                                               AS commit_sha,
+          f.raw_content                                              AS document_text,
+          (SELECT COUNT(*)::INTEGER FROM rule r
+            JOIN rule_llm_decision d ON d.rule_id = r.id
+            WHERE r.rules_file_id = f.id AND d.parse_ok = TRUE) AS rule_count
+        FROM rules_file f
+        LEFT JOIN source_project p ON p.id = f.project_id
+        ORDER BY document_name, source_path
+      `);
+      return rows.map(r => ({
+        document_id: r.document_id,
+        source_path: r.source_path,
+        document_name: r.document_name,
+        github_url: githubBlobUrl(r.canonical_url, r.commit_sha, r.source_path),
+        breadcrumb: githubRepoLabel(r.canonical_url, r.source_path),
+        document_text: r.document_text ?? "",
+        rule_count: Number(r.rule_count ?? 0),
+      }));
+    }
+
+    function sourceLinesFromText(documentText) {
+      if (!documentText) return [];
+      const lines = documentText.replace(/\r/g, "").split("\n");
+      return lines.map((text, i) => ({ line_number: i + 1, text }));
+    }
+
+    async function backfillSnapshots() {
+      await evalQuery(`
+        INSERT INTO rule_original_snapshot (rule_id, original_rule_text, original_line_start, original_line_end)
+        SELECT r.id::VARCHAR, r.rule_text, r.line_start, r.line_end
+        FROM rule r
+        WHERE NOT EXISTS (SELECT 1 FROM rule_original_snapshot s WHERE s.rule_id = r.id::VARCHAR)
+      `);
+    }
+
+    async function getRulesForDocument(documentId) {
+      const rows = await evalPrepared(
+        `
+        SELECT
+          r.id::VARCHAR             AS rule_id,
+          r.rules_file_id::VARCHAR  AS rules_file_id,
+          r.rule_text,
+          r.line_start,
+          r.line_end,
+          s.original_rule_text,
+          s.original_line_start,
+          s.original_line_end
+        FROM rule r
+        JOIN rule_original_snapshot s ON s.rule_id = r.id::VARCHAR
+        WHERE r.rules_file_id::VARCHAR = ?
+          AND (
+            EXISTS (SELECT 1 FROM rule_llm_decision d WHERE d.rule_id = r.id AND d.parse_ok = TRUE)
+            OR EXISTS (SELECT 1 FROM rule_extraction_label l WHERE l.rule_id = r.id::VARCHAR)
+          )
+        ORDER BY r.line_start, r.line_end
+        `,
+        [documentId]
+      );
+      return rows.map(r => ({
+        rule_id: r.rule_id,
+        rules_file_id: r.rules_file_id,
+        rule_text: r.rule_text,
+        line_start: Number(r.line_start),
+        line_end: Number(r.line_end),
+        original_rule_text: r.original_rule_text,
+        original_line_start: Number(r.original_line_start),
+        original_line_end: Number(r.original_line_end),
+      }));
+    }
+
+    async function getAllClassificationItems() {
+      await backfillSnapshots();
+      const [docs, predictions] = await Promise.all([
+        listDocuments(),
+        getClassificationPredictions(),
+      ]);
+      const docById = new Map(docs.map(d => [d.document_id, d]));
+      const rows = await evalQuery(`
+        SELECT
+          r.id::VARCHAR             AS rule_id,
+          r.rules_file_id::VARCHAR  AS rules_file_id,
+          r.rule_text,
+          r.line_start,
+          r.line_end
+        FROM rule r
+        WHERE EXISTS (SELECT 1 FROM rule_llm_decision d WHERE d.rule_id = r.id AND d.parse_ok = TRUE)
+        ORDER BY r.rules_file_id, r.line_start, r.line_end
+      `);
+      const ids = rows.map(r => r.rule_id);
+      const labelsByRule = await getClassificationLabelsByRules(ids);
+      return rows.map(r => {
+        const doc = docById.get(r.rules_file_id);
+        return {
+          rule_id: r.rule_id,
+          rules_file_id: r.rules_file_id,
+          document_id: doc?.document_id,
+          source_path: doc?.source_path ?? "",
+          document_name: doc?.document_name ?? "",
+          short_filename: doc?.source_path?.split("/").pop() ?? doc?.source_path ?? "",
+          github_url: doc?.github_url ?? null,
+          rule_text: r.rule_text,
+          line_start: Number(r.line_start),
+          line_end: Number(r.line_end),
+          document_text: doc?.document_text ?? "",
+          prediction: predictions.get(r.rule_id) ?? null,
+          labels: labelsByRule.get(r.rule_id) ?? [],
+        };
+      });
+    }
+
+    async function getClassificationPredictions() {
+      // Prod rule_llm_decision is v0.4 shape — prerequisites / enforcement_mechanisms /
+      // triggers are VARCHAR[], ambiguity_level is an ENUM, ambiguity_notes is text.
+      // Read them directly, no lossy adapter needed.
+      const rows = await evalQuery(`
+        WITH ranked AS (
+          SELECT d.*, ROW_NUMBER() OVER (PARTITION BY d.rule_id ORDER BY d.created_at DESC) AS rn
+          FROM rule_llm_decision d
+          WHERE d.parse_ok = TRUE
+        )
+        SELECT
+          ranked.id::VARCHAR                   AS decision_id,
+          ranked.rule_id::VARCHAR              AS rule_id,
+          ranked.prerequisites                 AS prerequisites,
+          ranked.enforcement_mechanisms        AS enforcement_mechanisms,
+          ranked.triggers                      AS triggers,
+          ranked.ambiguity_level::VARCHAR      AS ambiguity_level,
+          COALESCE(ranked.ambiguity_notes, '') AS ambiguity_notes,
+          COALESCE(ranked.confidence, 0.0)     AS confidence
+        FROM ranked
+        WHERE ranked.rn = 1
+      `);
+      // DuckDB-WASM returns VARCHAR[] as an Apache Arrow ListVector, not a
+      // native JS array. It exposes .toJson() which gives back a plain array;
+      // Array.isArray() on the vector returns false, so the legacy check
+      // silently dropped every list. Match every shape we might encounter.
+      const toList = (v) => {
+        if (v == null) return [];
+        if (Array.isArray(v)) return v.map(String);
+        if (typeof v.toJson === "function") {
+          const arr = v.toJson();
+          return Array.isArray(arr) ? arr.map(String) : [];
+        }
+        if (typeof v.toArray === "function") return Array.from(v.toArray()).map(String);
+        return [];
+      };
+      const out = new Map();
+      for (const r of rows) {
+        out.set(r.rule_id, {
+          decision_id: r.decision_id,
+          prerequisites: toList(r.prerequisites),
+          enforcement_mechanisms: toList(r.enforcement_mechanisms),
+          triggers: toList(r.triggers),
+          ambiguity_level: r.ambiguity_level || "",
+          ambiguity_notes: r.ambiguity_notes || "",
+          confidence: Number(r.confidence ?? 0),
+        });
+      }
+      return out;
+    }
+
+    async function getClassificationLabelsByRules(ruleIds) {
+      const out = new Map();
+      if (ruleIds.length === 0) return out;
+      const placeholders = ruleIds.map(() => "?").join(", ");
+      const rows = await evalPrepared(
+        `
+        SELECT
+          l.rule_id, l.labeler_id, le.handle, l.decision,
+          l.predicted_decision_id,
+          l.predicted_prerequisites,
+          l.predicted_enforcement_mechanisms,
+          l.predicted_triggers,
+          l.predicted_ambiguity_level,
+          l.predicted_ambiguity_notes,
+          l.corrected_prerequisites,
+          l.corrected_enforcement_mechanisms,
+          l.corrected_triggers,
+          l.corrected_ambiguity_level,
+          l.corrected_ambiguity_notes,
+          l.created_at, l.updated_at
+        FROM rule_classification_label l
+        JOIN labeler le ON le.id = l.labeler_id
+        WHERE l.rule_id IN (${placeholders})
+        ORDER BY l.updated_at DESC
+        `,
+        ruleIds
+      );
+      for (const r of rows) {
+        const list = out.get(r.rule_id) ?? [];
+        list.push({
+          rule_id: r.rule_id,
+          labeler_id: r.labeler_id,
+          labeler_handle: r.handle,
+          decision: r.decision,
+          predicted_decision_id: r.predicted_decision_id,
+          predicted_prerequisites: asListOr(r.predicted_prerequisites, []),
+          predicted_enforcement_mechanisms: asListOr(r.predicted_enforcement_mechanisms, []),
+          predicted_triggers: asListOr(r.predicted_triggers, []),
+          predicted_ambiguity_level: r.predicted_ambiguity_level,
+          predicted_ambiguity_notes: r.predicted_ambiguity_notes ?? "",
+          corrected_prerequisites: parseJsonField(r.corrected_prerequisites),
+          corrected_enforcement_mechanisms: parseJsonField(r.corrected_enforcement_mechanisms),
+          corrected_triggers: parseJsonField(r.corrected_triggers),
+          corrected_ambiguity_level: r.corrected_ambiguity_level,
+          corrected_ambiguity_notes: r.corrected_ambiguity_notes,
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+        });
+        out.set(r.rule_id, list);
+      }
+      return out;
+    }
+
+    // =================================================================
+    // duckdb/upserts
+    // =================================================================
+    async function upsertLabeler(handle, displayName = null) {
+      const existing = (await evalPrepared(
+        `SELECT id, handle, display_name FROM labeler WHERE handle = ?`, [handle]
+      ))[0];
+      if (existing) return { id: existing.id, handle: existing.handle, display_name: existing.display_name };
+      const id = crypto.randomUUID();
+      await evalPrepared(
+        `INSERT INTO labeler (id, handle, display_name) VALUES (?, ?, ?)`,
+        [id, handle, displayName]
+      );
+      return { id, handle, display_name: displayName };
+    }
+
+    async function ensureSnapshotForRule(ruleId) {
+      await evalPrepared(
+        `
+        INSERT INTO rule_original_snapshot (rule_id, original_rule_text, original_line_start, original_line_end)
+        SELECT r.id::VARCHAR, r.rule_text, r.line_start, r.line_end
+        FROM rule r
+        WHERE r.id::VARCHAR = ?
+          AND NOT EXISTS (SELECT 1 FROM rule_original_snapshot s WHERE s.rule_id = ?)
+        `,
+        [ruleId, ruleId]
+      );
+    }
+
+    async function updateRule({ ruleId, ruleText, lineStart, lineEnd, labelerId }) {
+      await ensureSnapshotForRule(ruleId);
+      await evalPrepared(
+        `UPDATE rule
+         SET rule_text = ?, line_start = ?, line_end = ?,
+             rule_text_norm = lower(regexp_replace(?, '\\s+', ' ', 'g')),
+             rule_text_sha256 = sha256(?)
+         WHERE id::VARCHAR = ?`,
+        [ruleText, lineStart, lineEnd, ruleText.trim(), ruleText, ruleId]
+      );
+      await evalPrepared(
+        `INSERT INTO rule_edit_pointer (rule_id, labeler_id, last_edited_at)
+         VALUES (?, ?, now())
+         ON CONFLICT (rule_id) DO UPDATE SET labeler_id = excluded.labeler_id, last_edited_at = excluded.last_edited_at`,
+        [ruleId, labelerId]
+      );
+    }
+
+    async function addRule({ rulesFileId, ruleText, lineStart, lineEnd, labelerId }) {
+      const newId = crypto.randomUUID();
+      await evalPrepared(
+        `INSERT INTO rule (id, rules_file_id, rule_text, rule_text_norm, rule_text_sha256, line_start, line_end, extractor_version, extracted_at)
+         VALUES (?::UUID, ?::UUID, ?, lower(regexp_replace(?, '\\s+', ' ', 'g')), sha256(?), ?, ?, 'human:add_missing_rule', now())`,
+        [newId, rulesFileId, ruleText, ruleText.trim(), ruleText, lineStart, lineEnd]
+      );
+      await evalPrepared(
+        `INSERT INTO rule_original_snapshot (rule_id, original_rule_text, original_line_start, original_line_end)
+         VALUES (?, ?, ?, ?)`,
+        [newId, ruleText, lineStart, lineEnd]
+      );
+      await evalPrepared(
+        `INSERT INTO rule_extraction_label (rule_id, labeler_id, decision) VALUES (?, ?, 'accept')`,
+        [newId, labelerId]
+      );
+      return newId;
+    }
+
+    async function ensureClassificationRow({ ruleId, labelerId, predictions }) {
+      const existing = (await evalPrepared(
+        `SELECT 1 FROM rule_classification_label WHERE rule_id = ? AND labeler_id = ?`,
+        [ruleId, labelerId]
+      ))[0];
+      if (existing) return;
+      const pred = predictions.get(ruleId);
+      if (!pred) {
+        await evalPrepared(
+          `INSERT INTO rule_classification_label (rule_id, labeler_id, decision) VALUES (?, ?, 'skip')`,
+          [ruleId, labelerId]
+        );
+        return;
+      }
+      const snapshot = stableStringify({
+        prerequisites: pred.prerequisites,
+        enforcement_mechanisms: pred.enforcement_mechanisms,
+        triggers: pred.triggers,
+        ambiguity_level: pred.ambiguity_level,
+        ambiguity_notes: pred.ambiguity_notes,
+      });
+      const snapHash = await sha256Hex(snapshot);
+      await evalPrepared(
+        `INSERT INTO rule_classification_label (
+            rule_id, labeler_id,
+            predicted_decision_id, predicted_snapshot_hash,
+            predicted_prerequisites, predicted_enforcement_mechanisms,
+            predicted_triggers, predicted_ambiguity_level, predicted_ambiguity_notes,
+            decision
+         ) VALUES (?, ?, ?, ?, ?::JSON, ?::JSON, ?::JSON, ?, ?, 'skip')`,
+        [
+          ruleId, labelerId,
+          pred.decision_id, snapHash,
+          JSON.stringify(pred.prerequisites),
+          JSON.stringify(pred.enforcement_mechanisms),
+          JSON.stringify(pred.triggers),
+          pred.ambiguity_level, pred.ambiguity_notes,
+        ]
+      );
+    }
+
+    async function putClassificationDecision({ ruleId, labelerId, decision, predictions }) {
+      await ensureClassificationRow({ ruleId, labelerId, predictions });
+      await evalPrepared(
+        `UPDATE rule_classification_label SET decision = ?, updated_at = now()
+         WHERE rule_id = ? AND labeler_id = ?`,
+        [decision, ruleId, labelerId]
+      );
+    }
+
+    const FIELD_NAMES = new Set([
+      "corrected_prerequisites",
+      "corrected_enforcement_mechanisms",
+      "corrected_triggers",
+      "corrected_ambiguity_level",
+      "corrected_ambiguity_notes",
+    ]);
+    const JSON_FIELDS = new Set([
+      "corrected_prerequisites",
+      "corrected_enforcement_mechanisms",
+      "corrected_triggers",
+    ]);
+
+    async function putClassificationField({ ruleId, labelerId, field, value, predictions }) {
+      if (!FIELD_NAMES.has(field)) throw new Error(`unknown field: ${field}`);
+      await ensureClassificationRow({ ruleId, labelerId, predictions });
+      if (value === null || value === undefined) {
+        await evalPrepared(
+          `UPDATE rule_classification_label SET ${field} = NULL, updated_at = now()
+           WHERE rule_id = ? AND labeler_id = ?`,
+          [ruleId, labelerId]
+        );
+        return;
+      }
+      // JSON columns accept VARCHAR input; DuckDB-WASM's binder dislikes the
+      // explicit ?::JSON cast for UPDATE prepared statements, so we just bind
+      // a JSON string for list-typed fields and a plain string otherwise.
+      const isJson = JSON_FIELDS.has(field);
+      const bound = isJson ? JSON.stringify(value) : value;
+      await evalPrepared(
+        `UPDATE rule_classification_label SET ${field} = ?, updated_at = now()
+         WHERE rule_id = ? AND labeler_id = ?`,
+        [bound, ruleId, labelerId]
+      );
+    }
+
+    // =================================================================
+    // identity
+    // =================================================================
+    const IDENTITY_KEY = "labeling.identity.labelerId";
+    const IdentityContext = createContext(null);
+
+    function IdentityProvider({ children }) {
+      const [labelers, setLabelers] = useState([]);
+      const [current, setCurrent] = useState(null);
+
+      const refresh = useCallback(async () => {
+        try {
+          const next = await listLabelers();
+          setLabelers(next);
+          setCurrent(prev => {
+            if (prev) return next.find(l => l.id === prev.id) ?? prev;
+            const stored = localStorage.getItem(IDENTITY_KEY);
+            if (stored) {
+              const match = next.find(l => l.id === stored);
+              if (match) return match;
+            }
+            return next[0] ?? null;
+          });
+        } catch (err) { console.error("listLabelers failed:", err); }
+      }, []);
+      useEffect(() => { refresh(); }, [refresh]);
+      useEffect(() => { if (current) localStorage.setItem(IDENTITY_KEY, current.id); }, [current?.id]);
+
+      const setCurrentById = useCallback(
+        (id) => setCurrent(labelers.find(l => l.id === id) ?? null),
+        [labelers]
+      );
+      const addLabeler = useCallback(async (handle) => {
+        const created = await upsertLabeler(handle);
+        setLabelers(prev => {
+          if (prev.some(l => l.id === created.id)) return prev;
+          return [...prev, created].sort((a, b) => a.handle.localeCompare(b.handle));
+        });
+        setCurrent(created);
+        return created;
+      }, []);
+      const value = useMemo(
+        () => ({ labelers, current, setCurrentById, addLabeler, refresh }),
+        [labelers, current, setCurrentById, addLabeler, refresh]
+      );
+      return html`<${IdentityContext.Provider} value=${value}>${children}<//>`;
+    }
+    function useIdentity() {
+      const ctx = useContext(IdentityContext);
+      if (!ctx) throw new Error("useIdentity inside IdentityProvider");
+      return ctx;
+    }
+
+    function displayName(labeler) {
+      if (!labeler) return "";
+      if (labeler.display_name) return labeler.display_name;
+      const base = (labeler.handle || "").split("@")[0];
+      if (!base) return labeler.handle || "";
+      return base.charAt(0).toUpperCase() + base.slice(1);
+    }
+
+    function LabelerPicker() {
+      const { labelers, current, setCurrentById, addLabeler } = useIdentity();
+      const [adding, setAdding] = useState(false);
+      const [draft, setDraft] = useState("");
+
+      const submit = async () => {
+        const h = draft.trim();
+        if (!h) return;
+        await addLabeler(h);
+        setDraft(""); setAdding(false);
+      };
+
+      if (adding) {
+        return html`
+          <div className="labeler-block">
+            <span>Labeler</span>
+            <div className="add-handle-row">
+              <input autoFocus placeholder="alice@example.com" value=${draft}
+                onChange=${e => setDraft(e.target.value)}
+                onKeyDown=${e => { if (e.key === "Enter") submit(); if (e.key === "Escape") setAdding(false); }} />
+              <button onClick=${submit}>Save</button>
+              <button onClick=${() => setAdding(false)}>Cancel</button>
+            </div>
+          </div>
+        `;
+      }
+      return html`
+        <div className="labeler-block">
+          <span>Labeler</span>
+          <div className="labeler-pill">
+            <select value=${current?.id ?? ""}
+              onChange=${(e) => {
+                if (e.target.value === "__add__") { setAdding(true); return; }
+                setCurrentById(e.target.value);
+              }}>
+              ${labelers.length === 0 && html`<option value="">— none —</option>`}
+              ${labelers.map(l => html`<option key=${l.id} value=${l.id}>${displayName(l)}</option>`)}
+              <option value="__add__">+ Add new…</option>
+            </select>
+            <${ChevronDown} />
+          </div>
+        </div>
+      `;
+    }
+
+    // =================================================================
+    // Inline icons (no extra dep)
+    // =================================================================
+    function Icon({ size = 14, fill = "none", stroke = "currentColor", strokeWidth = 1.75, children }) {
+      return html`
+        <svg className="icon" width=${size} height=${size} viewBox="0 0 24 24"
+             fill=${fill} stroke=${stroke} stroke-width=${strokeWidth}
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${children}</svg>
+      `;
+    }
+    // Canonical Lucide v0.x paths — same library the .pen file references via
+    // icon_font + iconFontFamily: "lucide". If we ever switch to dynamic
+    // fetching, point at https://unpkg.com/lucide-static/icons/<name>.svg.
+    const ChevronDown    = (p) => html`<${Icon} ...${p}><path d="m6 9 6 6 6-6"/><//>`;
+    const ChevronRight   = (p) => html`<${Icon} ...${p}><path d="m9 18 6-6-6-6"/><//>`;
+    const PlusIcon       = (p) => html`<${Icon} ...${p}><path d="M5 12h14"/><path d="M12 5v14"/><//>`;
+    const SearchIcon     = (p) => html`<${Icon} ...${p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><//>`;
+    const RefreshIcon    = (p) => html`<${Icon} ...${p}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/><//>`;
+    const GithubIcon     = (p) => html`<${Icon} ...${p}><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/><//>`;
+    const PenLineIcon    = (p) => html`<${Icon} ...${p}><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/><//>`;
+    const FileTextIcon   = (p) => html`<${Icon} ...${p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/><//>`;
+    const TextSelectIcon = (p) => html`<${Icon} ...${p}><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M21 19a2 2 0 0 1-2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h1"/><path d="M14 3h1"/><path d="M14 21h1"/><path d="M3 9v1"/><path d="M21 9v1"/><path d="M3 14v1"/><path d="M21 14v1"/><path d="M11 8a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2"/><path d="M14 16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2"/><path d="M13 8h-1v8h1"/><//>`;
+    const SlidersIcon    = (p) => html`<${Icon} ...${p}><line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/><line x1="14" y1="2" x2="14" y2="6"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="18" x2="16" y2="22"/><//>`;
+    const ExternalLinkIcon = (p) => html`<${Icon} ...${p}><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><//>`;
+
+    // =================================================================
+    // Hooks
+    // =================================================================
+    function useDebouncedCallback(fn, delay) {
+      const ref = useRef(fn);
+      ref.current = fn;
+      const timer = useRef(null);
+      useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+      return useCallback((...args) => {
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => ref.current(...args), delay);
+      }, [delay]);
+    }
+    function usePolling(callback, intervalMs, deps) {
+      const cb = useRef(callback);
+      cb.current = callback;
+      useEffect(() => {
+        const id = setInterval(() => { cb.current(); }, intervalMs);
+        return () => clearInterval(id);
+      }, deps ?? []);
+    }
+
+    const POLL_INTERVAL_MS = 2000;
+    const DEBOUNCE_MS = 400;
+
+    // =================================================================
+    // ExtractionPage — 3-pane (Files / Viewer / Rules)
+    // =================================================================
+    function ExtractionPage() {
+      const { current: labeler } = useIdentity();
+      const [docs, setDocs] = useState([]);
+      const [docFilter, setDocFilter] = useState("all");
+      const [docQuery, setDocQuery] = useState("");
+      const [activeDocId, setActiveDocId] = useState("");
+      const [rules, setRules] = useState([]);
+      const [expandedRuleId, setExpandedRuleId] = useState("");
+      const [pending, setPending] = useState(null);
+      const [confirmingAdd, setConfirmingAdd] = useState(null);
+      const [toast, setToast] = useState("");
+      const [editMode, setEditMode] = useState(null);
+
+      const loadDocs = useCallback(async () => {
+        try {
+          const next = await listDocuments();
+          setDocs(next);
+          setActiveDocId(cur => cur || next[0]?.document_id || "");
+        } catch (err) { setToast(`load docs failed: ${err.message ?? err}`); }
+      }, []);
+
+      const loadRules = useCallback(async () => {
+        if (!activeDocId) return;
+        try {
+          await backfillSnapshots();
+          const next = await getRulesForDocument(activeDocId);
+          setRules(next);
+        } catch (err) { setToast(`load rules failed: ${err.message ?? err}`); }
+      }, [activeDocId]);
+
+      useEffect(() => { loadDocs(); }, [loadDocs]);
+      useEffect(() => { loadRules(); }, [loadRules]);
+      usePolling(loadRules, POLL_INTERVAL_MS, [activeDocId]);
+
+      const activeDoc = useMemo(() => docs.find(d => d.document_id === activeDocId), [docs, activeDocId]);
+      const allLines = useMemo(() => sourceLinesFromText(activeDoc?.document_text ?? ""), [activeDoc?.document_text]);
+
+      const filteredDocs = useMemo(() => {
+        const q = docQuery.trim().toLowerCase();
+        return docs.filter(d => {
+          if (q && !d.document_name.toLowerCase().includes(q)) return false;
+          if (docFilter === "extracted" && (d.rule_count ?? 0) === 0) return false;
+          return true;
+        });
+      }, [docs, docQuery, docFilter]);
+
+      // Live highlight: a pending text-selection trumps the expanded rule.
+      // When a labeler expands a rule in the right panel, its lines get
+      // highlighted in the viewer and the viewer auto-scrolls to them.
+      const expandedRule = rules.find(r => r.rule_id === expandedRuleId);
+      const highlightStart = pending?.lineStart ?? expandedRule?.line_start ?? null;
+      const highlightEnd   = pending?.lineEnd   ?? expandedRule?.line_end   ?? null;
+
+      const viewerBodyRef = useRef(null);
+      useEffect(() => {
+        const body = viewerBodyRef.current;
+        if (!body || highlightStart == null) return;
+        const hl = body.querySelector(`[data-line-number="${highlightStart}"]`);
+        if (!hl) return;
+        // Scroll ONLY the viewer body — `scrollIntoView` would bubble and
+        // could pull the whole page when ancestors are also scrollable.
+        const bodyRect = body.getBoundingClientRect();
+        const hlRect = hl.getBoundingClientRect();
+        const offsetWithinBody = hlRect.top - bodyRect.top + body.scrollTop;
+        const target = offsetWithinBody - body.clientHeight / 2 + hl.clientHeight / 2;
+        body.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+      }, [expandedRuleId, pending?.lineStart, activeDocId]);
+
+      // Track text selection on the viewer.
+      function onViewerMouseUp(event) {
+        const sel = window.getSelection();
+        const text = sel?.toString();
+        if (!text || !text.trim()) { setPending(null); return; }
+        const range = sel.getRangeAt(0);
+        const container = event.currentTarget;
+        const findLn = (node) => {
+          let cur = node;
+          while (cur && cur !== container) {
+            if (cur.dataset?.lineNumber) return Number(cur.dataset.lineNumber);
+            cur = cur.parentNode;
+          }
+          return null;
+        };
+        const a = findLn(range.startContainer);
+        const b = findLn(range.endContainer);
+        if (a == null || b == null) return;
+        const [s, e] = a <= b ? [a, b] : [b, a];
+        setPending({ text: text.trim(), lineStart: s, lineEnd: e });
+      }
+
+      // Step 1: clicking Add Rule. Always allowed; if there's a current text
+      // selection, surface a Confirm/Cancel banner. Otherwise nudge the user
+      // to make a selection first.
+      function requestAddRule() {
+        if (!pending) {
+          setToast("Select text in the viewer first, then click Add Rule.");
+          return;
+        }
+        setConfirmingAdd({ ...pending });
+      }
+      // Step 2: confirming the add — actually INSERT into rule + auto-accept.
+      async function confirmAddRule() {
+        if (!confirmingAdd || !labeler || !activeDoc) return;
+        try {
+          await addRule({
+            rulesFileId: activeDoc.document_id,
+            ruleText: confirmingAdd.text,
+            lineStart: confirmingAdd.lineStart,
+            lineEnd: confirmingAdd.lineEnd,
+            labelerId: labeler.id,
+          });
+          setToast(`Added rule from L${confirmingAdd.lineStart}–${confirmingAdd.lineEnd}`);
+          setConfirmingAdd(null);
+          setPending(null);
+          window.getSelection()?.removeAllRanges();
+          await loadRules();
+        } catch (err) { setToast(`add failed: ${err.message ?? err}`); }
+      }
+
+      async function saveRuleEdit(rule, next) {
+        if (!labeler) return;
+        try {
+          await updateRule({
+            ruleId: rule.rule_id,
+            ruleText: next.ruleText,
+            lineStart: next.lineStart,
+            lineEnd: next.lineEnd,
+            labelerId: labeler.id,
+          });
+          setToast("Saved rule edit");
+          setEditMode(null);
+          await loadRules();
+        } catch (err) { setToast(`save failed: ${err.message ?? err}`); }
+      }
+
+      if (!labeler) {
+        return html`<main className="empty-state">Pick a labeler in the top bar to start.</main>`;
+      }
+
+      return html`
+        <main className="workbench extraction">
+          <aside className="sidebar">
+            <div className="sidebar-controls">
+              <div className="search-input">
+                <${SearchIcon} size=${14} />
+                <input placeholder="Search files..." value=${docQuery}
+                  onChange=${e => setDocQuery(e.target.value)} />
+              </div>
+              <div className="filter-row">
+                <div className="dropdown-pill">
+                  <select value=${docFilter} onChange=${e => setDocFilter(e.target.value)}>
+                    <option value="all">All</option>
+                    <option value="extracted">Extracted</option>
+                  </select>
+                  <${ChevronDown} size=${14} />
+                </div>
+                <span className="count-label">${filteredDocs.length} file${filteredDocs.length === 1 ? "" : "s"}</span>
+              </div>
+            </div>
+            <div className="sidebar-divider"></div>
+            <div className="sidebar-list">
+              ${filteredDocs.map(d => html`
+                <button key=${d.document_id}
+                  className=${`file-item${d.document_id === activeDocId ? " active" : ""}`}
+                  onClick=${() => setActiveDocId(d.document_id)}>
+                  <span className="filename">${d.source_path.split("/").pop()}</span>
+                  <span className="rule-count-badge">${d.rule_count} rule${d.rule_count === 1 ? "" : "s"}</span>
+                </button>
+              `)}
+            </div>
+          </aside>
+
+          <section className="viewer">
+            <div className="viewer-header">
+              <div className="viewer-filename">${activeDoc?.source_path?.split("/").pop() ?? "—"}</div>
+              <div className="breadcrumb">${activeDoc?.breadcrumb ?? ""}</div>
+              ${activeDoc?.github_url && html`
+                <a className="gh-btn" href=${activeDoc.github_url} target="_blank" rel="noreferrer noopener">
+                  <${GithubIcon} size=${14} /> View on GitHub
+                </a>
+              `}
+            </div>
+            <div className="viewer-body" ref=${viewerBodyRef} onMouseUp=${onViewerMouseUp}>
+              <div className="line-nums">
+                ${allLines.map(l => html`<span key=${l.line_number} className="ln">${l.line_number}</span>`)}
+              </div>
+              <div className="code-content">
+                ${allLines.map(l => {
+                  const isHl = highlightStart != null && l.line_number >= highlightStart && l.line_number <= highlightEnd;
+                  return html`
+                    <div key=${l.line_number} data-line-number=${String(l.line_number)}
+                         className=${`code-line${isHl ? " highlight" : ""}`}>${l.text || " "}</div>
+                  `;
+                })}
+              </div>
+            </div>
+            <div className="status-bar">
+              <${FileTextIcon} size=${12} />
+              <span>${activeDoc?.source_path?.split("/").pop() ?? "—"}</span>
+              <span className="divider">·</span>
+              <span>${allLines.length} line${allLines.length === 1 ? "" : "s"}</span>
+              <span className="spacer"></span>
+              ${pending && html`
+                <span><${TextSelectIcon} size=${12} /></span>
+                <span className="sel-info">Lines ${pending.lineStart}–${pending.lineEnd} selected</span>
+                <span className="divider">·</span>
+              `}
+              <span>Read-only</span>
+            </div>
+          </section>
+
+          <aside className="rules-panel">
+            <div className="rules-panel-header">
+              <div className="header-top">
+                <h2>Extracted Rules</h2>
+                <button className="add-rule-btn"
+                  onClick=${requestAddRule}
+                  title=${pending ? `Add rule from L${pending.lineStart}–${pending.lineEnd}` : "Select text in the viewer, then click Add Rule"}>
+                  <${PlusIcon} size=${14} /> Add Rule
+                </button>
+              </div>
+              <div className="header-meta">
+                <span>${rules.length} rule${rules.length === 1 ? "" : "s"} from ${activeDoc?.source_path?.split("/").pop() ?? "—"}</span>
+                <span><${SlidersIcon} size=${14} /></span>
+              </div>
+            </div>
+            ${confirmingAdd && html`
+              <div className="add-confirm-banner">
+                <div className="add-confirm-meta">Add as a rule from Lines ${confirmingAdd.lineStart}–${confirmingAdd.lineEnd}</div>
+                <div className="add-confirm-text">${confirmingAdd.text}</div>
+                <div className="add-confirm-actions">
+                  <button onClick=${() => setConfirmingAdd(null)}>Cancel</button>
+                  <button className="primary" onClick=${confirmAddRule}>Confirm</button>
+                </div>
+              </div>
+            `}
+            <div className="rules-list">
+              ${rules.length === 0 && html`<div className="empty-state">No rules in this file yet.</div>`}
+              ${rules.map(r => {
+                const isExpanded = r.rule_id === expandedRuleId;
+                const isEditing = editMode?.ruleId === r.rule_id;
+                return html`
+                  <div key=${r.rule_id}
+                       className=${`rule-item${isExpanded ? " expanded" : ""}`}
+                       onClick=${() => !isExpanded && setExpandedRuleId(r.rule_id)}>
+                    <div className="rule-item-summary"
+                         onClick=${() => isExpanded && setExpandedRuleId("")}>
+                      <div className="rule-item-summary-content">
+                        <span className="rule-item-text">${r.rule_text}</span>
+                        <span className="rule-item-meta">Lines ${r.line_start}–${r.line_end}</span>
+                      </div>
+                      ${isExpanded ? html`<${ChevronDown} size=${14} />` : html`<${ChevronRight} size=${14} />`}
+                    </div>
+                    ${isExpanded && html`
+                      <div className="rule-expanded-detail">
+                        <div className="rule-uuid-row">
+                          <span className="rule-uuid-label">RULE UUID</span>
+                          <span className="rule-uuid-value">#${r.rule_id.slice(0, 8)}</span>
+                        </div>
+                        ${isEditing && html`
+                          <div className="rule-text-box">
+                            <span className="caption">RULE TEXT</span>
+                            <textarea value=${editMode.ruleText}
+                              onChange=${e => setEditMode({ ...editMode, ruleText: e.target.value })} />
+                            <div className="rule-lines-row">
+                              <input type="number" value=${editMode.lineStart}
+                                onChange=${e => setEditMode({ ...editMode, lineStart: Number(e.target.value) })} />
+                              <input type="number" value=${editMode.lineEnd}
+                                onChange=${e => setEditMode({ ...editMode, lineEnd: Number(e.target.value) })} />
+                            </div>
+                          </div>
+                        `}
+                        <div className="rule-actions-row">
+                          ${isEditing ? html`
+                            <button onClick=${() => setEditMode(null)}>Cancel</button>
+                            <button className="primary" onClick=${() => saveRuleEdit(r, editMode)}>
+                              Save
+                            </button>
+                          ` : html`
+                            <button className="add-rule-btn" onClick=${() => setEditMode({
+                              ruleId: r.rule_id,
+                              ruleText: r.rule_text,
+                              lineStart: r.line_start,
+                              lineEnd: r.line_end,
+                            })}>
+                              <${PenLineIcon} size=${12} /> Change Rule
+                            </button>
+                          `}
+                        </div>
+                      </div>
+                    `}
+                  </div>
+                `;
+              })}
+            </div>
+          </aside>
+
+          ${toast && html`<div className="toast">${toast}</div>`}
+        </main>
+      `;
+    }
+
+    // =================================================================
+    // ClassificationPage — 2-pane (Rules sidebar / Form + Save/Skip)
+    // =================================================================
+    const AXES = [
+      { key: "PREREQUISITE", llmKey: "prerequisites",          correctedKey: "corrected_prerequisites",          field: "corrected_prerequisites",          isList: true,  prompt: "What information is needed to enforce this rule?" },
+      { key: "ENFORCEMENT",  llmKey: "enforcement_mechanisms", correctedKey: "corrected_enforcement_mechanisms", field: "corrected_enforcement_mechanisms", isList: true,  prompt: "What mechanism enforces this rule?" },
+      { key: "TRIGGERS",     llmKey: "triggers",               correctedKey: "corrected_triggers",               field: "corrected_triggers",               isList: true,  prompt: "When/where is this rule triggered?" },
+      { key: "AMBIGUITY",    llmKey: "ambiguity_notes",        correctedKey: "corrected_ambiguity_notes",        field: "corrected_ambiguity_notes",        isList: false, prompt: "What needs to be defined by the user? How ambiguous is this rule?" },
+    ];
+
+    function ClassificationPage() {
+      const { current: labeler } = useIdentity();
+      const [items, setItems] = useState([]);
+      const [predictions, setPredictions] = useState(new Map());
+      const [statusFilter, setStatusFilter] = useState("all");
+      const [search, setSearch] = useState("");
+      const [selectedRuleId, setSelectedRuleId] = useState("");
+      const [expanded, setExpanded] = useState({ PREREQUISITE: true, ENFORCEMENT: false, TRIGGERS: false, AMBIGUITY: false });
+      const [toast, setToast] = useState("");
+
+      const loadItems = useCallback(async () => {
+        try {
+          const [next, preds] = await Promise.all([getAllClassificationItems(), getClassificationPredictions()]);
+          setItems(next);
+          setPredictions(preds);
+          setSelectedRuleId(cur => cur || next[0]?.rule_id || "");
+        } catch (err) { setToast(`load failed: ${err.message ?? err}`); }
+      }, []);
+
+      useEffect(() => { loadItems(); }, [loadItems]);
+      usePolling(loadItems, POLL_INTERVAL_MS, []);
+
+      const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return items.filter(item => {
+          if (q && !item.rule_text.toLowerCase().includes(q) && !item.rule_id.toLowerCase().includes(q)) return false;
+          if (statusFilter === "all") return true;
+          const myLabel = item.labels.find(l => l.labeler_id === labeler?.id);
+          // A rule is "labeled by me" only when I clicked Save Classification.
+          // Skip and unsaved drafts do not count.
+          const isLabeled = myLabel?.decision === "accept";
+          return statusFilter === "labeled" ? isLabeled : !isLabeled;
+        });
+      }, [items, search, statusFilter, labeler?.id]);
+
+      const selected = useMemo(
+        () => filtered.find(i => i.rule_id === selectedRuleId) ?? filtered[0],
+        [filtered, selectedRuleId]
+      );
+
+      function advance(direction = 1) {
+        const idx = filtered.findIndex(i => i.rule_id === selectedRuleId);
+        const nextIdx = idx + direction;
+        const next = filtered[nextIdx >= 0 && nextIdx < filtered.length ? nextIdx : idx];
+        if (next) setSelectedRuleId(next.rule_id);
+      }
+
+      if (!labeler) {
+        return html`<main className="empty-state">Pick a labeler in the top bar to start.</main>`;
+      }
+
+      return html`
+        <main className="workbench classification">
+          <aside className="sidebar">
+            <div className="sidebar-controls">
+              <div className="search-input">
+                <${SearchIcon} size=${16} />
+                <input placeholder="Search by text or UUID..."
+                  value=${search} onChange=${e => setSearch(e.target.value)} />
+              </div>
+              <div className="filter-row">
+                <div className="dropdown-pill">
+                  <select value=${statusFilter} onChange=${e => setStatusFilter(e.target.value)}>
+                    <option value="all">All</option>
+                    <option value="labeled">Labeled by me</option>
+                    <option value="unlabeled">Unlabeled by me</option>
+                  </select>
+                  <${ChevronDown} size=${14} />
+                </div>
+                <span className="count-label">${filtered.length} items</span>
+              </div>
+            </div>
+            <div className="sidebar-divider"></div>
+            <div className="sidebar-list">
+              ${filtered.length === 0 && html`<div className="empty-state">No rules match.</div>`}
+              ${filtered.map(item => {
+                const my = item.labels.find(l => l.labeler_id === labeler.id);
+                const labeled = my?.decision === "accept";
+                return html`
+                  <button key=${item.rule_id}
+                    className=${`class-rule-item${item.rule_id === selected?.rule_id ? " active" : ""}`}
+                    onClick=${() => setSelectedRuleId(item.rule_id)}>
+                    <span className="text">${item.rule_text}</span>
+                    <span className="status-row">
+                      <span className=${`status-badge ${labeled ? "labeled" : "unlabeled"}`}>
+                        ${labeled ? "labeled" : "unlabeled"}
+                      </span>
+                      <span className="source-file">${item.short_filename}</span>
+                    </span>
+                  </button>
+                `;
+              })}
+            </div>
+          </aside>
+
+          ${selected ? html`<${ClassificationForm}
+              key=${selected.rule_id}
+              item=${selected}
+              labelerId=${labeler.id}
+              predictions=${predictions}
+              expanded=${expanded}
+              setExpanded=${setExpanded}
+              onAfterMutate=${loadItems}
+              onAdvance=${advance}
+              setToast=${setToast}
+            />` : html`<section className="class-main empty-state">No items.</section>`}
+
+          ${toast && html`<div className="toast">${toast}</div>`}
+        </main>
+      `;
+    }
+
+
+    function summarizePrediction(pred, axisKey) {
+      if (!pred) return "—";
+      const v = pred[axisKey];
+      if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+      return v || "—";
+    }
+
+    function pickHighlightedSnippet(text, startLine, endLine) {
+      if (!text) return [];
+      const all = text.replace(/\r/g, "").split("\n");
+      return all.map((line, i) => ({
+        line_number: i + 1,
+        text: line,
+        highlight: (i + 1) >= startLine && (i + 1) <= endLine,
+      }));
+    }
+
+    function ClassificationForm({ item, labelerId, predictions, expanded, setExpanded, onAfterMutate, onAdvance, setToast }) {
+      const myLabel = item.labels.find(l => l.labeler_id === labelerId);
+      const codeSnippet = useMemo(
+        () => pickHighlightedSnippet(item.document_text, item.line_start, item.line_end),
+        [item.document_text, item.line_start, item.line_end]
+      );
+
+      function formatList(v) { return (v ?? []).join("\n"); }
+      function parseList(v) { return (v ?? "").split("\n").map(s => s.trim()).filter(Boolean); }
+
+      const initial = useMemo(() => {
+        const pred = item.prediction;
+        return {
+          PREREQUISITE: formatList(myLabel?.corrected_prerequisites ?? pred?.prerequisites ?? []),
+          ENFORCEMENT: formatList(myLabel?.corrected_enforcement_mechanisms ?? pred?.enforcement_mechanisms ?? []),
+          TRIGGERS: formatList(myLabel?.corrected_triggers ?? pred?.triggers ?? []),
+          AMBIGUITY: myLabel?.corrected_ambiguity_notes ?? pred?.ambiguity_notes ?? "",
+          AMBIGUITY_LEVEL: myLabel?.corrected_ambiguity_level ?? pred?.ambiguity_level ?? "none",
+        };
+      }, [item.rule_id, myLabel?.updated_at]);
+      const [draft, setDraft] = useState(initial);
+      useEffect(() => { setDraft(initial); }, [initial]);
+
+      // Axis edits are LOCAL state only — they do NOT hit the DB until the
+      // labeler clicks "Save Classification". rule_classification_label thus
+      // only reflects what each labeler has explicitly committed (or skipped).
+      function patchAxis(axisKey, text) {
+        setDraft(cur => ({ ...cur, [axisKey]: text }));
+      }
+      function patchAmbiguityLevel(level) {
+        setDraft(cur => ({ ...cur, AMBIGUITY_LEVEL: level }));
+      }
+
+      // "Save Classification" — commits every corrected_* axis from the
+      // local draft, then sets decision = 'accept'. Done as sequential
+      // putClassificationField calls (the proven per-field path) since
+      // DuckDB-WASM's prepared statement binder doesn't like a single
+      // UPDATE that mixes ?::JSON casts with VARCHAR placeholders.
+      async function saveClassification() {
+        try {
+          const ruleId = item.rule_id;
+          await putClassificationField({ ruleId, labelerId, field: "corrected_prerequisites",          value: parseList(draft.PREREQUISITE), predictions });
+          await putClassificationField({ ruleId, labelerId, field: "corrected_enforcement_mechanisms", value: parseList(draft.ENFORCEMENT),  predictions });
+          await putClassificationField({ ruleId, labelerId, field: "corrected_triggers",               value: parseList(draft.TRIGGERS),     predictions });
+          await putClassificationField({ ruleId, labelerId, field: "corrected_ambiguity_level",        value: draft.AMBIGUITY_LEVEL || null, predictions });
+          await putClassificationField({ ruleId, labelerId, field: "corrected_ambiguity_notes",        value: draft.AMBIGUITY || null,       predictions });
+          await putClassificationDecision({ ruleId, labelerId, decision: "accept", predictions });
+          setToast(`Saved classification (${item.rule_text.slice(0, 40)}…)`);
+          await onAfterMutate();
+          onAdvance(1);
+        } catch (err) { setToast(`save failed: ${err.message ?? err}`); }
+      }
+
+      // Skip — only writes the decision; does NOT persist draft edits.
+      // The draft stays in local state until you navigate away.
+      async function skip() {
+        try {
+          await putClassificationDecision({ ruleId: item.rule_id, labelerId, decision: "skip", predictions });
+          await onAfterMutate();
+          onAdvance(1);
+        } catch (err) { setToast(`skip failed: ${err.message ?? err}`); }
+      }
+
+      const codeBodyRef = useRef(null);
+      useEffect(() => {
+        const body = codeBodyRef.current;
+        if (!body) return;
+        const hl = body.querySelector(".code-section-line.highlight");
+        if (!hl) return;
+        const bodyRect = body.getBoundingClientRect();
+        const hlRect = hl.getBoundingClientRect();
+        const offsetWithinBody = hlRect.top - bodyRect.top + body.scrollTop;
+        const target = offsetWithinBody - body.clientHeight / 2 + hl.clientHeight / 2;
+        body.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+      }, [item.rule_id, item.line_start]);
+
+      return html`
+        <section className="class-main">
+          <div className="class-top">
+            <div className="code-section">
+              <div className="code-section-header">
+                <span>${item.short_filename}</span>
+              </div>
+              <div className="code-section-body" ref=${codeBodyRef}>
+                ${codeSnippet.map(l => html`
+                  <div key=${l.line_number} className=${`code-section-line${l.highlight ? " highlight" : ""}`}>
+                    <span className="ln">${l.line_number}</span>
+                    <span className="lt">${l.text || " "}</span>
+                  </div>
+                `)}
+              </div>
+            </div>
+          </div>
+
+          <div className="class-axes-scroll">
+            <div className="axis-grid">
+              ${AXES.map(axis => {
+                const isOpen = !!expanded[axis.key];
+                const summary = (() => {
+                  if (axis.key === "AMBIGUITY") return draft.AMBIGUITY_LEVEL || "—";
+                  return summarizePrediction(item.prediction, axis.llmKey);
+                })();
+                return html`
+                  <div key=${axis.key} className="axis-field">
+                    <button className="axis-header"
+                      onClick=${() => setExpanded(prev => ({ ...prev, [axis.key]: !prev[axis.key] }))}>
+                      <span className="axis-header-left">
+                        <span className="axis-label">${axis.key}</span>
+                        <span className="axis-summary-value">${summary}</span>
+                      </span>
+                      ${isOpen ? html`<${ChevronDown} size=${14} />` : html`<${ChevronRight} size=${14} />`}
+                    </button>
+                    ${isOpen && html`
+                      <div className="axis-body">
+                        <div className="axis-llm-box">
+                          <span className="head">LLM Judge</span>
+                          <span className="body">
+                            ${axis.isList
+                              ? (item.prediction?.[axis.llmKey] ?? []).join(", ") || axis.prompt
+                              : (item.prediction?.[axis.llmKey] || axis.prompt)}
+                          </span>
+                        </div>
+                        ${axis.key === "AMBIGUITY" && html`
+                          <div className="axis-notes-box">
+                            <span className="head">Ambiguity level</span>
+                            <select value=${draft.AMBIGUITY_LEVEL}
+                              onChange=${e => patchAmbiguityLevel(e.target.value)}>
+                              <option value="none">none</option>
+                              <option value="low">low</option>
+                              <option value="medium">medium</option>
+                              <option value="high">high</option>
+                            </select>
+                          </div>
+                        `}
+                        <div className="axis-notes-box">
+                          <span className="head">Your notes${axis.isList ? " (one per line)" : ""}</span>
+                          <textarea value=${draft[axis.key]}
+                            placeholder=${`Add your ${axis.key.toLowerCase()} notes...`}
+                            onChange=${e => patchAxis(axis.key, e.target.value)} />
+                        </div>
+                      </div>
+                    `}
+                  </div>
+                `;
+              })}
+            </div>
+          </div>
+          <div className="action-bar">
+            <button className="skip-btn" onClick=${skip}>Skip</button>
+            <button className="save-btn" onClick=${saveClassification}>Save Classification</button>
+          </div>
+        </section>
+      `;
+    }
+
+    // =================================================================
+    // App
+    // =================================================================
+    function App() {
+      const [page, setPage] = useState("extraction");
+      const [bootError, setBootError] = useState("");
+      const [bootReady, setBootReady] = useState(false);
+
+      useEffect(() => {
+        let cancelled = false;
+        getConnection().then(
+          () => { if (!cancelled) setBootReady(true); },
+          (err) => { if (!cancelled) setBootError(err.message || String(err)); }
+        );
+        return () => { cancelled = true; };
+      }, []);
+
+      if (bootError) {
+        return html`
+          <div className="boot-splash">
+            <div className="banner error" style=${{ maxWidth: "32rem" }}>
+              <b>Failed to connect to MotherDuck.</b><br/>${bootError}
+            </div>
+          </div>
+        `;
+      }
+      if (!bootReady) {
+        return html`
+          <div className="boot-splash">
+            <div className="spinner"></div>
+            <div style=${{ color: "var(--fg-secondary)" }}>Loading WASM and connecting to MotherDuck…</div>
+            <div style=${{ fontSize: "12px", color: "var(--fg-tertiary)" }}>First load may take a few seconds.</div>
+          </div>
+        `;
+      }
+
+      return html`
+        <${IdentityProvider}>
+          <div className="app-shell">
+            <header className="topbar">
+              <div>
+                <h1>${page === "extraction" ? "Extraction" : "Classification"}</h1>
+                <p>${
+                  page === "extraction"
+                    ? "Extract and review rules from markdown source files."
+                    : "Review extracted rules and classification fields against source text."
+                }</p>
+              </div>
+              <div className="top-right">
+                <${LabelerPicker} />
+                <button className="icon-btn" title="Refresh"
+                  onClick=${() => window.location.reload()}>
+                  <${RefreshIcon} size=${14} />
+                </button>
+                <div className="tabs">
+                  <button className=${`tab-btn${page === "extraction" ? " active" : ""}`}
+                    onClick=${() => setPage("extraction")}>Extraction</button>
+                  <button className=${`tab-btn${page === "classification" ? " active" : ""}`}
+                    onClick=${() => setPage("classification")}>Classification</button>
+                </div>
+              </div>
+            </header>
+            ${page === "extraction" ? html`<${ExtractionPage} />` : html`<${ClassificationPage} />`}
+          </div>
+        <//>
+      `;
+    }
+
+    createRoot(document.getElementById("root")).render(html`<${App} />`);
+  </script>
+</body>
+</html>

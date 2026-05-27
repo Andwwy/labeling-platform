@@ -1,0 +1,7 @@
+{
+  "buildCommand": "node scripts/build-vercel-config.js",
+  "outputDirectory": ".",
+  "rewrites": [
+    { "source": "/", "destination": "/labeling-platform.html" }
+  ]
+}
