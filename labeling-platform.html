@@ -2253,18 +2253,25 @@
       function formatList(v) { return (v ?? []).join("\n"); }
       function parseList(v) { return (v ?? "").split("\n").map(s => s.trim()).filter(Boolean); }
 
-      const initial = useMemo(() => {
-        const pred = item.prediction;
-        return {
-          PREREQUISITE: formatList(myLabel?.corrected_prerequisites ?? pred?.prerequisites ?? []),
-          ENFORCEMENT: formatList(myLabel?.corrected_enforcement_mechanisms ?? pred?.enforcement_mechanisms ?? []),
-          TRIGGERS: formatList(myLabel?.corrected_triggers ?? pred?.triggers ?? []),
-          AMBIGUITY: myLabel?.corrected_ambiguity_notes ?? pred?.ambiguity_notes ?? "",
-          AMBIGUITY_LEVEL: myLabel?.corrected_ambiguity_level ?? pred?.ambiguity_level ?? "none",
-        };
-      }, [item.rule_id, myLabel?.updated_at]);
+      // Initial draft = whatever this labeler previously committed for this
+      // rule, or empty. We intentionally do NOT fall back to the LLM
+      // prediction — that lives in its own "LLM Judge" box and pre-filling
+      // the note field with it would force every labeler to re-edit. The
+      // form remounts (via key=rule_id in the parent) when you switch
+      // rules, so useState's lazy initializer reads fresh values then.
+      const initial = useMemo(() => ({
+        PREREQUISITE:    formatList(myLabel?.corrected_prerequisites          ?? []),
+        ENFORCEMENT:     formatList(myLabel?.corrected_enforcement_mechanisms ?? []),
+        TRIGGERS:        formatList(myLabel?.corrected_triggers               ?? []),
+        AMBIGUITY:       myLabel?.corrected_ambiguity_notes ?? "",
+        AMBIGUITY_LEVEL: myLabel?.corrected_ambiguity_level ?? "none",
+      }), [item.rule_id, myLabel?.updated_at]);
       const [draft, setDraft] = useState(initial);
-      useEffect(() => { setDraft(initial); }, [initial]);
+      // No `useEffect(setDraft(initial), [initial])` reset: polling refreshes
+      // myLabel.updated_at as a new Date reference every cycle, which would
+      // bust the dep check and overwrite whatever the labeler had typed.
+      // The form already remounts on rule switch via key=rule_id, which is
+      // the only time we actually want the draft to re-initialize.
 
       // Axis edits are LOCAL state only — they do NOT hit the DB until the
       // labeler clicks "Save Classification". rule_classification_label thus
