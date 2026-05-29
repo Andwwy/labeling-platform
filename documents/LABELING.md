@@ -1,5 +1,10 @@
 # Labeling Platform — Functionality (v0.4)
 
+> Current as of commit `5e42121` (2026-05-28). For the data layer and
+> debugging see [DATA-LAYER.md](DATA-LAYER.md) and [RUNBOOK.md](RUNBOOK.md);
+> for the stack, config, and deployment see
+> [LABELING-STACK.md](LABELING-STACK.md).
+
 The labeling platform is the human-in-the-loop review tool for the
 rules-in-the-wild pipeline. It sits between two pipeline steps — extraction
 (pulling individual rules out of agent rulebooks like `AGENTS.md`, `CLAUDE.md`,
@@ -16,24 +21,23 @@ deployment notes.
 
 | Area | v0.3 / prototype | v0.4 |
 |---|---|---|
-| Decision states | `accept` · `correct` · `reject` · `skip` | `accept` · `reject` · `skip` (correct is implicit — see below) |
-| Extraction edits | Stored as `corrected_rule_text` / `corrected_start_line` / `corrected_end_line` on the label row | **UPDATE `rule.rule_text` / `line_start` / `line_end` directly** — real-time DB write |
-| Original extractor output | Lost on edit | Preserved in `rule_original_snapshot` (lazy-backfilled side table) |
+| Decision states | `accept` · `correct` · `reject` · `skip` | `accept` · `skip` written by the UI (`reject` reserved in the enum, no control); correct is implicit — see below |
+| Extraction edits | Stored as `corrected_rule_text` / `corrected_start_line` / `corrected_end_line` on the label row | **`UPDATE rule.rule_text` directly** (Change Rule); the line range stays as extracted |
+| Original extractor output | Lost on edit | Preserved in `rule.original_*` columns (frozen at insert) |
 | Label identity | `target_key = sha256(document\|lines\|text)` | `(rule_id, labeler_id)` compound PK |
 | View | Per-labeler isolation; "my labels" only | **Shared multi-labeler view** — every labeler sees every other labeler's decisions on the same rule |
 | Classification taxonomy | 7 enums (specificity, cognitive_load, …) | **4 fields per PDF spec** — prerequisites, enforcement_mechanisms, triggers, ambiguity (level + notes) |
 | Free-form notes | `notes` column on both tables | Removed — only `corrected_ambiguity_notes` survives (concrete by construction) |
-| Save model | "Save" button per item | **Real-time field-level upserts**, debounced 400 ms |
-| Add missing rule | Separate panel below decision buttons | **Text-select on the `.md` viewer** → "Add as rule" banner appears |
+| Save model | "Save" button per item | **Explicit Save Classification button** — one `INSERT … ON CONFLICT`; extraction edits persist on change |
+| Add missing rule | Separate panel below decision buttons | **`Add Rule` button → centered modal** (rule text + note + 4 axes) |
 | Source link | None | **GitHub blob link** in detail header |
 | Rule body on classification | Editable | Read-only (edit it on the Extraction page) |
-| Cross-labeler refresh | Manual reload | **Polling every 2 s** while a page is open |
+| Cross-labeler refresh | Manual reload | **Refresh on load, document switch, after a mutation, and the top-bar refresh button** (no background poll) |
 
-The "correct" decision disappears because edits are now direct writes: when
-a labeler edits `rule.rule_text` or a `corrected_*` axis, the change is
-immediately persisted. "Did anyone change anything?" is recoverable by
-comparing `rule.rule_text` to `rule.original_rule_text`, or by checking
-whether any `corrected_*` column is non-null.
+The "correct" decision disappears because changes are recoverable from data:
+compare `rule.rule_text` to `rule.original_rule_text`, or check whether any
+`corrected_*` column on the classification label is non-null. No explicit
+"correct" state is needed.
 
 ## Where it sits in the stack
 
@@ -62,44 +66,71 @@ whether any `corrected_*` column is non-null.
 
 The HTML:
 - **Reads** from `rules_file`, `rule`, `source_project`, `rule_llm_decision`
-- **Writes** to `rule` (direct edits + add-missing-rule), `labeler`,
-  `rule_extraction_label`, `rule_classification_label`,
-  `rule_original_snapshot`, `rule_edit_pointer`
+- **Writes** to `rule` (Change Rule edits + add-missing-rule), `rules_file`
+  (the `missed_rules` log), `labeler`, `rule_extraction_label`,
+  `rule_classification_label`
 
 ## The two pages
 
 The UI has two top tabs — **Extraction** and **Classification** — that
 correspond to the two questions a labeler is asked. Both share the same
-top-bar identity picker (your labeler handle), document filter, and
-status filter.
+top-bar identity picker (your labeler handle); each page keeps its own
+filter row (Extraction filters the file list; Classification filters by
+your label status).
 
 ### Extraction page
 
 **The question:** is this the right rule, with the right text and line range,
 extracted from this source file?
 
-Layout: master-detail. Left = a queue of rules in the selected document,
-filterable by `Unlabeled by me` / `All` / `Labeled by me`. Right = the
-selected rule, with:
+Layout: three panes.
 
-- A header with the document name, **`View on GitHub`** link
-  (`canonical_url/blob/{commit_sha}/{path}`), line range, and an `edited`
-  pill if the rule body has been changed from the extractor's original
-- The source `.md` rendered with line numbers, with the rule's current
-  lines highlighted (plus four lines of context)
-- **Editable rule text** + start/end line — every blur/keystroke
-  (debounced 400 ms) issues `UPDATE rule …`. The change shows up on
-  every other labeler's screen on the next 2-second poll
-- Three decision buttons: **Accept · Reject · Skip**
-- A row of "labeler badges" showing every labeler who has decided on
-  this rule, color-coded by their verdict (your own badge is outlined)
+- **Left sidebar** — the file picker: a search box, an `All` / `Extracted`
+  filter, and one row per source file with a rule-count badge. Selecting a file
+  loads its rules.
+- **Center viewer** — the source `.md` rendered with line numbers. Lines any
+  rule was extracted from are tinted green; the currently selected unit-or-rule
+  span is highlighted yellow. The header carries the filename, breadcrumb, and a
+  **`View on GitHub`** link (`canonical_url/blob/{commit_sha}/{path}`); a status
+  bar shows the line count and, when you drag-select text, the selected line
+  range.
+- **Right panel — "Extracted Rules"** — the review queue, **grouped into source
+  units** (see [Source units](#source-units)).
 
-**Add missing rule.** No dedicated panel. Select text inside the rendered
-source view → a small green banner appears with the selected text and
-line range → click `+ Add as rule`. That inserts a new row into the
-pipeline's `rule` table (`extractor_version = 'human:add_missing_rule'`),
-snapshots its body into `rule_original_snapshot`, and auto-accepts on
-your behalf. The new rule shows up in everyone's queue on the next poll.
+**The queue is two-level.** Each rule is bucketed into the source block it came
+from. A unit row shows a source snippet, its `Lines a–b` range, and an
+`n/m labeled` rollup (how many of its rules you hold an extraction label on);
+expanding it lists the rule rows. The header meta reads `N rules · M units`, and
+a **`Show empty units`** toggle reveals blocks that produced no rules.
+
+**A rule row** shows the normalized `rule_text` and its own line range, and
+expands to:
+
+- the rule's UUID,
+- **Change Rule** — edits the rule text in place (the line range stays as
+  extracted — there are no line-number inputs); the change is written straight
+  to `rule` and bumps `last_edited_at`,
+- **Delete** — hard-removes the rule and everything that references it: its
+  `rule_classification_label`, `rule_extraction_label`, and `rule_llm_decision`
+  children first, then the `rule` row itself (children-first so the FK delete
+  can't hang the wasm connection).
+
+Selecting or expanding a unit highlights its whole block span; selecting a child
+rule highlights only that rule's `line_start`–`line_end` span. Clicking a green
+rule-line in the viewer selects the matching rule and opens its unit.
+
+**Add missing rule.** Two entry points open the same centered modal: the
+panel-level **`Add Rule`** button (scoped to a drag-selection in the viewer, if
+any) and the **`+`** on any unit row (scoped to that unit's line range — the
+affordance for the empty units the toggle reveals). The modal collects the rule
+text, a free-text *note*, and the four classification axes (filled manually —
+there is no LLM call). On confirm it inserts a new row into the pipeline's
+`rule` table, **reusing the file's existing `extractor_version`** so a
+human-added rule is indistinguishable from an extracted one (no separate
+human-vs-LLM provenance), auto-accepts the extraction on your behalf, writes the
+axes as your `corrected_*` classification label (`decision='accept'`), and
+appends a one-line `[skipped_rule] …` record to the source file's
+`rules_file.missed_rules` column.
 
 ### Classification page
 
@@ -107,8 +138,9 @@ your behalf. The new rule shows up in everyone's queue on the next poll.
 
 Same master-detail shell, with the **rule body shown as read-only** — if
 boundaries or text need editing, that's the Extraction page's job. The
-four axes are pre-filled from the latest `parse_ok=TRUE` row in
-`rule_llm_decision` and are independently editable:
+latest `parse_ok=TRUE` prediction from `rule_llm_decision` is shown
+read-only in an **LLM Judge** box; the four editable correction fields
+below start blank (no pre-fill):
 
 - **Prerequisites** — multi-line list ("what info is needed to enforce")
 - **Enforcement mechanisms** — multi-line list ("linter", "regex", "LLM", "bash"…)
@@ -116,10 +148,81 @@ four axes are pre-filled from the latest `parse_ok=TRUE` row in
 - **Ambiguity** — level dropdown `{none, low, medium, high}` + a free-text
   "what specifically is ambiguous?" note
 
-Every edit fires a debounced field-level `UPDATE rule_classification_label
-SET corrected_<field> = ?` — no per-row Save button. The decision row
-below the fields has the same `Accept · Reject · Skip` buttons + the
-labeler badges showing everyone's classification verdicts.
+The page commits via an explicit **Save Classification** button: one
+`INSERT … ON CONFLICT` that writes every `corrected_*` axis plus
+`decision='accept'` in a single round-trip. A **Skip** button writes
+`decision='skip'`. There is no Reject control and no labeler-badge row.
+
+## Source units
+
+A *source unit* is the contiguous source block a rule was extracted from — a
+single line if the rule came from one line, the whole paragraph if it came from
+a paragraph. Units are **derived in the browser**, not stored: `deriveSourceUnits`
+segments the file's `rules_file.document_text` into blocks and buckets each rule
+into the block that contains its `line_start`.
+
+**Why group.** Extraction *normalizes* each rule into a directive (see
+[`../../extraction_guide.md`](../../extraction_guide.md)), so `rule_text` no
+longer matches the source verbatim, and a single source line or paragraph can
+yield several rules (compound splitting). A flat rule queue hides that
+provenance. Grouping the queue by the source span each rule came from lets a
+reviewer (a) see every rule a paragraph produced side by side, (b) spot
+over-splitting, and (c) spot **missed** rules — a source block with no extracted
+rule under it is the signal.
+
+**Segmentation.**
+
+- Split the document into blocks on blank lines.
+- A fenced ```` ``` ```` … ```` ``` ```` block is one block.
+- A **heading anchors a unit**: a markdown heading (`#…`) or a standalone bold
+  label like `**PR Creation Checklist:**` starts a new unit, and everything
+  beneath it — paragraphs, list / numbered items, fenced blocks — belongs to that
+  unit until the next heading. A heading-delimited list is **one** unit, not
+  one-per-item (a 7-item checklist = one unit with 7 child rules).
+- In a region with no enclosing heading, split on blank lines into paragraph
+  blocks.
+- Assign rule → unit by `line_start` containment, falling back to the nearest
+  preceding unit. Two rules split from the same line share a unit; rules from the
+  same section share a unit even when their per-rule line ranges differ.
+
+**No schema change** — `rules_file.document_text` plus `rule.line_start` /
+`rule.line_end` are enough, computed in the browser. The per-rule
+`line_start`/`line_end` is the *minimal* span of that one rule, used for the
+yellow highlight; the *unit* is the enclosing block. The two coexist — units are
+derived for grouping, the per-rule span still drives the highlight.
+
+**The two-level queue** (right panel of the Extraction page):
+
+- Top level: one collapsible row per source unit, in document order — a source
+  snippet, the unit's `Lines a–b` range, a `+` to add a rule scoped to the unit,
+  and an `n/m labeled` rollup (how many of the unit's rules you hold an
+  extraction label on). Empty units show `no rules` instead of a rollup.
+- Expanding a unit lists its extracted rules (the normalized `rule_text`s), each
+  selectable.
+- A **`Show empty units`** toggle reveals source blocks that produced *no* rules
+  — the affordance for catching missed rules. Their `+` opens the Add Rule modal
+  prefilled with the block's line range and source text.
+
+**Selection / highlighting.**
+
+- Selecting a child rule highlights its own `line_start`–`line_end` span in the
+  viewer.
+- Selecting or expanding a unit highlights the whole block span.
+- Clicking a green rule-line in the viewer selects the matching rule and opens
+  its unit. Highlight priority: a pending drag-selection, then the expanded
+  rule, then the active unit.
+
+**Notes.**
+
+- A rule whose span crosses a block boundary is assigned by `line_start`.
+- Because extraction has no per-rule accept control (only `Add Rule`
+  auto-accepts), rollups usually read `0/n` — an honest reflection of the
+  workflow.
+- Units are derived, not stored, so the view survives pipeline re-runs the same
+  way the flat queue does.
+
+**Not in scope:** the Classification page (stays flat — it operates per rule),
+reordering rules within a unit, and merging rules across units.
 
 ## Decision model
 
@@ -132,12 +235,17 @@ on both pages:
 | `reject` | This isn't a real rule (extraction) / can't be classified on these axes (classification) |
 | `skip` | Defer — I'm not deciding now |
 
+Only `accept` and `skip` are reachable from the UI today: extraction
+auto-writes `accept` when you add a rule, and classification's Save / Skip
+buttons write `accept` / `skip`. `reject` stays in the `label_decision`
+enum but has no control yet.
+
 "Did this labeler change anything?" is computed from data, not stored as
 a label state:
 
-- **Extraction**: `rule.rule_text != rule.original_rule_text` or
-  `rule.line_start != rule.original_line_start` or `rule.line_end != rule.original_line_end`.
-  Plus `rule_edit_pointer` says who touched it most recently.
+- **Extraction**: `rule.rule_text != rule.original_rule_text` (line ranges
+  are no longer editable, so they always match the extractor's).
+  `rule.last_edited_at` records when the body was last changed.
 - **Classification**: any of `corrected_prerequisites`,
   `corrected_enforcement_mechanisms`, `corrected_triggers`,
   `corrected_ambiguity_level`, `corrected_ambiguity_notes` is non-null.
@@ -168,26 +276,21 @@ the data is there.
 
 ## Storage schema
 
-The labeling app owns five tables:
+The labeling app owns three tables:
 
 - **`labeler`** — `(id UUID PK, handle UNIQUE, display_name, created_at)`.
   Created when someone picks "Add new…" in the labeler dropdown.
 - **`rule_extraction_label`** — `(rule_id, labeler_id) PK`, `decision`,
   timestamps. That's it — edits to the rule live on `rule`.
 - **`rule_classification_label`** — `(rule_id, labeler_id) PK`,
-  `decision`, `predicted_decision_id`, `predicted_snapshot_hash`, six
-  `predicted_*` columns (frozen at row creation), five `corrected_*`
-  columns (real-time editable; NULL = "unchanged from prediction"),
-  timestamps.
-- **`rule_original_snapshot`** — `(rule_id PK, original_rule_text,
-  original_line_start, original_line_end, snapshotted_at)`. Mirrors what
-  the pipeline's `rule` row looked like the first time we saw it.
-  Lazy-backfilled on every read.
-- **`rule_edit_pointer`** — `(rule_id PK, labeler_id, last_edited_at)`.
-  The most recent editor of a rule's body, kept as a single row per rule
-  so reads don't need a window function across an event log.
+  `decision`, `predicted_decision_id`, `predicted_snapshot_hash`, five
+  `predicted_*` axis columns (frozen at row creation) mirrored by five
+  `corrected_*` columns (NULL = "unchanged from prediction"), timestamps.
 
-The full v0.4 DDL is in [`schema-v0.4.duckdb.sql`](schema-v0.4.duckdb.sql).
+The `original_*` extractor output lives directly on the pipeline's `rule`
+table (COALESCEd to the live values for older rows), so there is no
+snapshot side-table. The full v0.4 DDL is in
+[`schema-v0.4.duckdb.sql`](schema-v0.4.duckdb.sql).
 
 ## Running
 
@@ -213,7 +316,7 @@ Vercel deployment story.
   appear in the extraction queue unless someone has already labeled them.
 - **It does not handle live conflicts between concurrent editors of the
   same rule body.** Two labelers editing `rule.rule_text` simultaneously
-  produce last-write-wins. The 2 s polling will surface the loser's stale
+  produce last-write-wins. A manual refresh surfaces the loser's stale
   view; there's no CRDT or merge.
 - **It does not surface dedup of semantically-equivalent rules.** v0.3's
   `rule_semantic_cluster*` tables are intentionally deferred (PDF marks

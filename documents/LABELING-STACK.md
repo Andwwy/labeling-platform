@@ -1,5 +1,10 @@
 # Labeling Platform — Stack & Cautions (v0.4)
 
+> Current as of commit `5e42121` (2026-05-28). For the functional contract
+> (what each page does, what gets written when) see [LABELING.md](LABELING.md);
+> for the data layer and debugging see [DATA-LAYER.md](DATA-LAYER.md) and
+> [RUNBOOK.md](RUNBOOK.md).
+
 A maintenance reference for [`labeling-platform.html`](../labeling-platform.html),
 the single-file browser app that lets reviewers label rules-in-the-wild
 output directly against MotherDuck. If you need to change how it works —
@@ -12,17 +17,17 @@ read [`LABELING.md`](LABELING.md).
 
 ## What it is
 
-A self-contained static HTML page (~1.1k lines) that:
+A self-contained static HTML page (~2,850 lines) that:
 
 - Renders a two-tab labeling UI (Extraction, Classification) with master-detail layouts
 - Connects directly to MotherDuck from the browser via `@motherduck/wasm-client`
 - Reads from the pipeline tables (`rules_file`, `rule`, `source_project`, `rule_llm_decision`)
-- **Writes directly to `rule`** for live rule body edits
-- Writes labels to its own tables (`labeler`, `rule_extraction_label`, `rule_classification_label`)
-  plus side tables (`rule_original_snapshot`, `rule_edit_pointer`)
+- **Writes directly to `rule`** for rule-body edits and add-missing-rule inserts
+- Writes labels to its own three tables (`labeler`, `rule_extraction_label`,
+  `rule_classification_label`); `original_*` lives on `rule`, so there are no side tables
 - Loads the MotherDuck token from a sibling `.env` file (gitignored)
-- Polls every 2 seconds while a page is open so every labeler sees every
-  other labeler's edits live
+- Refreshes on load, document switch, after a mutation, and via the top-bar
+  refresh button (a full `window.location.reload()`) — there is no background poll
 
 ## The stack
 
@@ -197,46 +202,47 @@ python3 -m http.server 8765
 
 ```
 On boot:
-  loadConfig()                                  (fetch .env)
+  loadConfig()                                  (window.__LABELING_CONFIG → .env → localStorage)
   MDConnection.create({ mdToken })
   → conn.isInitialized()
-  → USE rules_in_the_wild
+  → USE <MOTHERDUCK_DATABASE>
   → CREATE TABLE IF NOT EXISTS labeler / rule_extraction_label /
-    rule_classification_label / rule_original_snapshot /
-    rule_edit_pointer
+    rule_classification_label                   (three tables)
+  → ALTER TABLE rules_file ADD COLUMN IF NOT EXISTS missed_rules   (best-effort)
 
 On Extraction page load:
-  listDocuments()                               (fetches per call — cheap join)
-  backfillSnapshots()                           (idempotent NOT EXISTS)
-  getExtractionItems(documentId)                (rules judged OR labeled)
-  getExtractionLabelsByRules(ruleIds)           (every labeler's decision)
+  listLabelers()
+  listDocuments()                               (per-file rule counts — cheap join)
+  getRulesForDocument(documentId, labelerId)    (every rule in the file, original_* via COALESCE;
+                                                 a my_extraction_decision subquery feeds the unit rollup)
 
-On rule body edit (debounced 400ms):
-  ensureSnapshotForRule(rule_id)
-  UPDATE rule SET rule_text=?, line_start=?, line_end=?, …
-  UPSERT rule_edit_pointer (who edited last + when)
+On Change Rule (Save in the edit box):
+  updateRule({ ruleId, ruleText })              (UPDATE rule.rule_text + norm/hash + last_edited_at)
 
-On decision click:
-  ensureSnapshotForRule(rule_id)
-  UPSERT rule_extraction_label (rule_id, labeler_id, decision)
+On Add Rule (confirm in the modal):
+  addRule(...)                                  (INSERT rule reusing the file's extractor_version;
+                                                 then auto-accept rule_extraction_label)
+  saveClassificationLabel(...)                  (the four axes as corrected_*, decision='accept')
+  appendMissedRuleNote(...)                     (best-effort "[skipped_rule] …" → rules_file.missed_rules)
+
+On Delete (confirm):
+  deleteRule({ ruleId })                        (children first: rule_classification_label →
+                                                 rule_extraction_label → rule_llm_decision → rule)
 
 On Classification page load:
-  listDocuments()
-  backfillSnapshots()
-  getClassificationItems(documentId)            (rules with parse_ok decisions)
-  getClassificationPredictions(documentId)      (latest per rule)
-  getClassificationLabelsByRules(ruleIds)
+  listDocumentsForClassification()
+  getAllClassificationItems()                   (rules with a parse_ok decision OR an accept label)
+  getClassificationPredictions()                (latest parse_ok prediction per rule)
+  getClassificationLabelsByRules(ruleIds)       (every labeler's existing label)
 
-On classification field edit (debounced 400ms per field):
-  ensureClassificationRow(rule_id, labeler_id)  (frozen predicted_* snapshot)
-  UPDATE rule_classification_label SET corrected_<field> = …
+On Save Classification:
+  saveClassificationLabel({ ruleId, labelerId, corrected, predictions })
+                                                (one INSERT … ON CONFLICT: all corrected_* + decision='accept')
 
-On decision click:
-  ensureClassificationRow(rule_id, labeler_id)
-  UPDATE rule_classification_label SET decision = ?
+On Skip:
+  skipClassificationLabel({ ruleId, labelerId, predictions })     (decision='skip')
 
-Polling (every 2s, while a page is open):
-  loadItems() — same as page load, but in-place state update
+Refresh (manual): top-bar button → window.location.reload(). There is no background poll.
 ```
 
 ## Schema (created on first connect)
@@ -279,20 +285,17 @@ CREATE TABLE IF NOT EXISTS rule_classification_label (
     PRIMARY KEY (rule_id, labeler_id)
 );
 
-CREATE TABLE IF NOT EXISTS rule_original_snapshot (
-    rule_id             VARCHAR PRIMARY KEY,
-    original_rule_text  VARCHAR NOT NULL,
-    original_line_start INTEGER NOT NULL,
-    original_line_end   INTEGER NOT NULL,
-    snapshotted_at      TIMESTAMP NOT NULL DEFAULT current_timestamp
-);
-
-CREATE TABLE IF NOT EXISTS rule_edit_pointer (
-    rule_id        VARCHAR PRIMARY KEY,
-    labeler_id     VARCHAR NOT NULL,
-    last_edited_at TIMESTAMP NOT NULL DEFAULT current_timestamp
-);
+-- Pipeline table, not owned here. The "Add Rule" flow appends a
+-- "[skipped_rule] …" log line, so boot best-effort-ensures the column
+-- exists (wrapped in try/catch — rules_file is absent in a fresh local DB).
+ALTER TABLE rules_file ADD COLUMN IF NOT EXISTS missed_rules TEXT;
 ```
+
+Three tables are created (`labeler`, `rule_extraction_label`,
+`rule_classification_label`). The `original_*` extractor output lives
+directly on the pipeline's `rule` table, so there is no
+`rule_original_snapshot`; "who last edited" is `rule.last_edited_at`, so
+there is no `rule_edit_pointer` either.
 
 `predicted_snapshot_hash = sha256(stableStringify({prerequisites,
 enforcement_mechanisms, triggers, ambiguity_level, ambiguity_notes}))`.
@@ -309,27 +312,31 @@ reads from them.
 The single `<script type="module">` block at the bottom is divided into
 section banners. Top to bottom:
 
-1. **imports** — React, HTM, MDConnection from the importmap
-2. **config — .env loader** — `loadConfig()` + `parseEnv()`
-3. **lib/hash** — `sha256Hex`, `stableStringify`, `parseJsonField`
-4. **duckdb/schema** — the five `CREATE TABLE IF NOT EXISTS` DDLs
+1. **imports** — React, HTM, `createRoot`, `MDConnection` from the importmap
+2. **config — three-source loader** — `loadConfig()` + `parseEnv()`
+3. **hashing helpers** — `sha256Hex`, `stableStringify`, `parseJsonField`
+4. **duckdb/schema — v0.4 DDL** — the three `CREATE TABLE IF NOT EXISTS`
+   DDLs + the best-effort `rules_file.missed_rules` ALTER
 5. **duckdb/client** — `getConnection()` singleton, `evalQuery` / `evalPrepared`
 6. **duckdb/queries** — `listLabelers`, `listDocuments`,
-   `backfillSnapshots`, `getExtractionItems`,
-   `getExtractionLabelsByRules`, `getClassificationPredictions`,
-   `getClassificationLabelsByRules`, `getClassificationItems`
-7. **duckdb/upserts** — `upsertLabeler`, `ensureSnapshotForRule`,
-   `updateRule`, `addRule`, `putExtractionDecision`,
-   `ensureClassificationRow`, `putClassificationDecision`,
-   `putClassificationField`
+   `getRulesForDocument`, `listDocumentsForClassification`,
+   `getAllClassificationItems`, `getClassificationPredictions`,
+   `getClassificationLabelsByRules`, plus `githubBlobUrl` / `githubRepoLabel`
+7. **duckdb/upserts** — `upsertLabeler`, `updateRule`, `addRule`,
+   `appendMissedRuleNote`, `deleteRule`, `predictedSnapshotArgs`,
+   `saveClassificationLabel`, `skipClassificationLabel`
 8. **identity** — `IdentityContext`, `IdentityProvider`, `useIdentity`, `LabelerPicker`
-9. **shared components** — `StatusSelect`, `DocumentSelect`, `DecisionButtons`,
-   `GithubLink`, `LabelerBadges`, `SourceLines` (with text-selection callback),
-   `parseList`/`formatList`
-10. **hooks** — `useDebouncedCallback`, `usePolling`
-11. **pages** — `ExtractionPage` + `ExtractionDetail`, `ClassificationPage` + `ClassificationDetail`
-12. **App** — top-level shell with boot splash + tabs + LabelerPicker
-13. **boot** — `createRoot().render(...)`
+9. **Inline icons** — small lucide-style `Icon` wrappers (no extra dep)
+10. **Hooks** — `useDebouncedCallback`, `usePolling`, `POLL_INTERVAL_MS`,
+    `DEBOUNCE_MS` (all defined but currently unused — see TECH-DEBT C1)
+11. **ExtractionPage** — 3-pane (Files / Viewer / Rules); the Rules pane is a
+    two-level queue grouped into client-derived source units
+    (`deriveSourceUnits`), with the Add-Rule modal and inline Change-Rule /
+    Delete controls
+12. **ClassificationPage** — 2-pane (Rules sidebar / Form + Save/Skip),
+    with the read-only LLM-Judge box
+13. **App** — top-level shell: boot splash + tabs + `LabelerPicker` + refresh
+14. **boot** — `createRoot(...).render(html\`<${App} />\`)`
 
 The CSS lives in an inline `<style>` block in `<head>`.
 
@@ -405,29 +412,20 @@ SELECT COUNT(*)::INTEGER AS n FROM rule_extraction_label
 The labeler dropdown writes the picked labeler's UUID into
 `localStorage['labeling.identity.labelerId']`. Every save attaches
 `labeler_id` to the row. Reads do NOT filter by `labeler_id` — every
-labeler sees every other labeler's decisions in the badge row.
+labeler's label rows coexist (the `(rule_id, labeler_id)` compound PK).
 
-If you want a per-labeler-only view, change `filterExtractionByStatus`
-/ `filterClassificationByStatus` to also drop rows with `labeler_id !=
-me` from the queue. The current behavior is intentional per the v0.4
-multi-labeler spec.
+The `Unlabeled by me` / `All` / `Labeled by me` queue filter narrows what
+you see by your own labels; it does not hide other labelers' rows from the
+underlying tables. The shared multi-labeler view is intentional per the
+v0.4 spec.
 
 ### ⚠️ Two labelers editing the same rule body race on writes
 
 DuckDB / MotherDuck serializes writes per catalog, so the second write
-wins — there's no merge. The 2-second polling will surface the loser's
-stale view; their next edit will overwrite the winner's change. If
-labelers are about to actively co-edit the same rule, either coordinate
-verbally or bump `POLL_INTERVAL_MS` down so the in-flight edits collide
-sooner and one labeler backs off.
-
-### ⚠️ Polling cost
-
-`POLL_INTERVAL_MS = 2000` means each open page makes ~4 queries every
-two seconds (rules + labels for extraction; rules + labels +
-predictions for classification). With ~5 labelers that's ~10 queries/sec
-to MotherDuck. Acceptable for an internal tool; bump the interval if you
-notice rate-limit warnings in the console.
+wins — there's no merge. There is no background poll, so the loser won't
+see the winner's change until they refresh (the top-bar button does a full
+reload); their next edit then overwrites it. If labelers are about to
+actively co-edit the same rule, coordinate verbally.
 
 ### ⚠️ Cold WASM load is ~10 MB
 
@@ -436,12 +434,16 @@ script — typically 2–4 seconds on a fast connection. Subsequent loads
 are cached. The boot splash is distinct from the "loading data" state
 so users don't mistake a 3-second hang for a broken app.
 
-### ⚠️ JSON columns: bind as text, cast in SQL
+### ⚠️ Array columns: bind as a JSON string, parse with `from_json`
 
-DuckDB-WASM has no first-class binding for JS arrays into a `JSON`
-column. The proven pattern is `JSON.stringify(arr)` in JS and cast with
-`?::JSON` in SQL (see `putClassificationField`). Do **not** try to bind
-a JS array directly.
+DuckDB-WASM has no first-class binding for JS arrays into prod's
+`VARCHAR[]` axis columns. The proven pattern — used in
+`saveClassificationLabel` — is `JSON.stringify(arr)` in JS, then
+`from_json(?, '["VARCHAR"]')` in SQL. Do **not** bind a JS array
+directly, and do **not** use `?::JSON`: it works against a local-DDL
+`JSON` column but stores the literal string against prod's `VARCHAR[]`,
+reading back the wrong shape. See [DATA-LAYER.md](DATA-LAYER.md)
+(§ "Bind VARCHAR[] as a JSON string") for the full rationale.
 
 ### ⚠️ HTM templating gotchas
 
@@ -467,8 +469,8 @@ Pick another port — the comment at the top of the HTML suggests 8765.
 | "Permission denied" on a save | Token is read-only. Re-mint with `read_write` scope |
 | "TypeError: Do not know how to serialize a BigInt" | A `COUNT(*)` somewhere is missing `::INTEGER` |
 | Items load but Save does nothing | Identity not picked — header dropdown is empty |
-| Lots of duplicate rows for one rule | Two labelers have their own row by design (compound PK). Their badges appear in the labeler-badges row |
-| Edits to one rule don't show on another tab | 2 s polling is normal; refresh the tab if it feels slow, or lower `POLL_INTERVAL_MS` |
+| Lots of duplicate rows for one rule | Two labelers have their own row by design — `(rule_id, labeler_id)` compound PK |
+| Edits to one rule don't show on another tab | There is no background poll — click the top-bar refresh (full reload) to pull other labelers' edits |
 
 ## Where the data lives
 
@@ -478,7 +480,7 @@ Pick another port — the comment at the top of the HTML suggests 8765.
   `UPDATE rule` and `INSERT INTO rule` — make sure the token scope
   allows that.
 - **Label tables (owned by this app)**: `labeler`,
-  `rule_extraction_label`, `rule_classification_label`,
-  `rule_original_snapshot`, `rule_edit_pointer`. DDL in this file
-  and in [`schema-v0.4.duckdb.sql`](schema-v0.4.duckdb.sql).
+  `rule_extraction_label`, `rule_classification_label` (three). DDL in
+  this file and in [`schema-v0.4.duckdb.sql`](schema-v0.4.duckdb.sql).
+  The add-missing-rule flow also appends to `rules_file.missed_rules`.
 - **Identity (browser-only)**: `localStorage['labeling.identity.labelerId']`.

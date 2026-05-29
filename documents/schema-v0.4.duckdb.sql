@@ -17,13 +17,35 @@
 --      so extractor edit-distance metrics stay computable.
 --
 -- Pipeline:
---   Crawler → rules_file → rule (.original_* + editable rule_text/lines)
+--   Crawler → rules_file → source_block (segmented spans)
+--                                        ↓
+--                          rule (.original_* + editable rule_text/lines,
+--                                source_block_id, extraction_reason)
 --                                        ↓
 --                                rule_llm_decision (4 axes)
 --                                        ↓
 --                            rule_extraction_label   (decision only)
 --                                        ↓
 --                            rule_classification_label  (predicted + edited 4 axes)
+--
+--   Human annotation (orthogonal to the pipeline):
+--     rule_comment / source_block_comment — free-text notes a labeler attaches
+--     to a rule or a source block; each comment is joined to its labeler.
+--
+-- ADDENDUM (2026-05-28): re-extraction redesign.
+--   The single-rules-per-file set is being dropped and re-extracted by the
+--   crawler from rules_file.raw_content. Four changes support the new flow:
+--     1. rule.extraction_reason — the extractor now emits a short reason for
+--        WHY a span is a rule (shown on the extraction page).
+--     2. source_block — the markdown segmentation (previously derived only in
+--        the browser) is now a first-class table, so a block has stable
+--        identity, an EDITABLE line range (original_* frozen), and a 1-to-many
+--        link to the rules extracted from it (rule.source_block_id).
+--     3. rule_comment / source_block_comment — labelers can comment on a rule
+--        OR a source block; the comment ties back to the labeler (joint).
+--     4. rule.rule_type ('rule' vs 'context') + rule.execution_guidance — the
+--        extractor now tags whether a span is a directive or project/action
+--        context, and keeps the "how" (execution guidance) beside the directive.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -66,6 +88,11 @@ CREATE TYPE label_decision AS ENUM ('accept','reject','skip');
 -- carries the "what specifically is ambiguous" the PDF asks for.
 CREATE TYPE ambiguity_level AS ENUM ('none','low','medium','high');
 
+-- Whether an extracted span is a normative RULE the agent must follow, or
+-- project/action CONTEXT that informs behavior without itself being a directive.
+-- Context is extracted + tagged (not dropped) so labelers see the distinction.
+CREATE TYPE rule_type AS ENUM ('rule','context');
+
 -- Append-only history for the judge — same shape as v0.3.
 CREATE TYPE judge_decision_trigger AS ENUM (
     'initial',
@@ -100,10 +127,47 @@ CREATE TABLE rules_file (
     content_sha256  BLOB NOT NULL,
     byte_size       INTEGER NOT NULL,
     fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Appended log of rules the extractor MISSED. The labeling UI's "Add
+    -- Rule" flow lets a human flag a rule the agent failed to extract; each
+    -- such addition appends a one-line "[skipped_rule] …" record here (the
+    -- app ALTERs this column in on boot, so it may be absent on older DBs).
+    missed_rules    TEXT,
     UNIQUE (project_id, path, commit_sha)
 );
 CREATE INDEX rules_file_project_idx ON rules_file (project_id);
 CREATE INDEX rules_file_sha_idx     ON rules_file (content_sha256);
+
+-- A source_block is one segmented span of a rules_file (a heading, a list
+-- item, a paragraph, a fenced code block). The crawler emits these alongside
+-- the rules it extracts; each rule points at the block it came from
+-- (rule.source_block_id), giving an explicit block→rule (1-to-many) relation
+-- instead of the browser-only line-containment heuristic.
+--
+-- line_start / line_end are LIVE editable (a labeler can widen/narrow a block
+-- on the extraction page); original_line_* freeze the segmenter's output and
+-- double as the natural anchor for re-matching a block across re-segmentation.
+--
+-- WHY NON-UNIQUE (rules_file_id, original_line_start, original_line_end):
+--   The extraction guide (§3.2, §6.2) splits a compound single line into
+--   multiple rules — and their blocks — that can share ONE line range. A UNIQUE
+--   constraint would reject the second one. It's also a DuckDB-WASM foot-gun:
+--   WASM HANGS the connection on a constraint violation instead of throwing, so
+--   the platform pre-checks in JS rather than relying on the constraint. A plain
+--   index gives the lookup speed without the collision.
+CREATE TABLE source_block (
+    id                  UUID PRIMARY KEY DEFAULT uuid(),
+    rules_file_id       UUID NOT NULL REFERENCES rules_file(id),
+    kind                TEXT,            -- heading | list_item | paragraph | code
+    line_start          INTEGER NOT NULL,   -- LIVE editable
+    line_end            INTEGER NOT NULL,   -- LIVE editable
+    original_line_start INTEGER NOT NULL,   -- frozen segmenter output (natural anchor)
+    original_line_end   INTEGER NOT NULL,
+    snippet             TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_edited_at      TIMESTAMPTZ         -- NULL until a labeler edits the range
+);
+CREATE INDEX source_block_file_idx      ON source_block (rules_file_id);
+CREATE INDEX source_block_origlines_idx ON source_block (rules_file_id, original_line_start, original_line_end);
 
 -- -----------------------------------------------------------------------------
 -- 3. Labeler identity (replaces app_users + the deferred labeler table)
@@ -119,24 +183,27 @@ CREATE TABLE labeler (
 -- -----------------------------------------------------------------------------
 -- 4. Extracted rule
 --    rule_text / line_start / line_end are LIVE state — labelers can update
---    them directly from the extraction page (real-time writes). The original
+--    rule_text directly from the extraction page (Change Rule). The original
 --    extractor output is frozen into original_rule_text / original_line_*
 --    so extractor accuracy is still computable from data.
 --
---    `created_by_labeler_id` flags rules that came from "add missing rule"
---    (labeler selects text in the .md viewer). For those, original_* equals
---    rule_text/line_* at insert time. The LLM judge runs on these the same
---    way it does on extractor-produced rules.
+--    "Add missing rule" inserts an ordinary rule row: it reuses the file's
+--    existing extractor_version (no separate human-vs-LLM provenance), and
+--    original_* equals rule_text/line_* at insert time. The LLM judge runs
+--    on these the same way it does on every other rule.
 --
---    last_edited_at + last_edited_by_labeler_id audit who touched the rule
---    last. Used to surface "this rule changed since you labeled it" on
---    other labelers' existing extraction labels (compare against
---    rule_extraction_label.updated_at).
+--    last_edited_at records when a labeler last edited the rule body (NULL
+--    until first edit). Used to surface "this rule changed since you labeled
+--    it" against rule_extraction_label.updated_at.
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE rule (
     id                          UUID PRIMARY KEY DEFAULT uuid(),
     rules_file_id               UUID NOT NULL REFERENCES rules_file(id),
+    -- The segmented source span this rule was extracted from (1 block → N
+    -- rules). NULLABLE: hand-added rules and rules from pre-source_block
+    -- extractions may not be linked; the UI falls back to line containment.
+    source_block_id             UUID REFERENCES source_block(id),
     -- LIVE editable state
     rule_text                   TEXT NOT NULL,
     line_start                  INTEGER NOT NULL,
@@ -151,15 +218,27 @@ CREATE TABLE rule (
     embedding                   FLOAT[1024],
     extracted_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     extractor_version           TEXT NOT NULL,
-    -- "Add missing rule" provenance. NULL = extractor-produced.
-    created_by_labeler_id       UUID REFERENCES labeler(id),
-    -- NULL until a labeler edits rule_text / line_start / line_end.
-    last_edited_at              TIMESTAMPTZ,
-    last_edited_by_labeler_id   UUID REFERENCES labeler(id),
-    UNIQUE (rules_file_id, original_line_start, original_line_end)
+    -- The extractor's short justification for WHY this span is a rule. Set at
+    -- extraction; frozen (not a labeler-editable field). NULL for hand-added
+    -- rules (no model reason) and for pre-addendum extractions.
+    extraction_reason           TEXT,
+    -- Extractor classification: 'rule' (a normative directive the agent must
+    -- follow) vs 'context' (project/action info that informs behavior but is
+    -- not itself a directive). Frozen at extraction; 'rule' for hand-added rows.
+    rule_type                   rule_type NOT NULL DEFAULT 'rule',
+    -- The "how": execution guidance the source pairs with this rule (commands,
+    -- steps, caveats), kept beside the normalized directive. Frozen; NULL if none.
+    execution_guidance          TEXT,
+    -- NULL until a labeler edits rule_text from the extraction page.
+    last_edited_at              TIMESTAMPTZ
+    -- NON-UNIQUE on (rules_file_id, original_line_start, original_line_end):
+    -- a compound single line splits into several rules sharing one line range
+    -- (extraction guide §3.2/§6.2), and DuckDB-WASM hangs on a UNIQUE violation.
+    -- See "WHY NON-UNIQUE" on source_block above — same reasoning.
 );
 CREATE INDEX rule_sha_idx        ON rule (rule_text_sha256);
 CREATE INDEX rule_rules_file_idx ON rule (rules_file_id);
+CREATE INDEX rule_origlines_idx  ON rule (rules_file_id, original_line_start, original_line_end);
 
 -- -----------------------------------------------------------------------------
 -- 5. LLM judge decision — APPEND-ONLY HISTORY
@@ -174,6 +253,13 @@ CREATE INDEX rule_rules_file_idx ON rule (rules_file_id);
 --      ambiguity_level      — enum  + ambiguity_notes (rationale, optional)
 --    These are TEXT[] not enum[] because the PDF's examples are open-ended
 --    free-form items — the labeling UI is a multi-line list, no enum lock-in.
+--
+-- FUTURE (deferred 2026-05-28): deterministic regex pre-classification. A regex
+-- schema would match rule_text against patterns for rules that are
+-- deterministically enforceable, auto-tag them 'enforced'/'solved' (rendered in
+-- red in the UI), and short-circuit the LLM judge for that subset. Decision for
+-- now: detect-and-ignore — do NOT act on a match yet; revisit when the
+-- enforcement_mechanisms taxonomy stabilizes.
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE rule_llm_decision (
@@ -243,13 +329,22 @@ CREATE INDEX rule_extraction_label_labeler_idx ON rule_extraction_label (labeler
 --    prompt-iteration tooling can compute "which labels were made against
 --    which prompt version." predicted_snapshot_hash flags drift when a
 --    fresher rule_llm_decision exists with different axis values.
+--
+--    predicted_decision_id / predicted_snapshot_hash are NULLABLE: a rule can
+--    be labeled even when it has NO LLM prediction (e.g. rules added by hand on
+--    the extraction page, or accept-only rules the judge never scored). In that
+--    case every predicted_* column is NULL and the labeler fills the axes from
+--    scratch. They must stay nullable — a non-null fabricated/placeholder
+--    predicted_decision_id would violate the FK to rule_llm_decision, and a
+--    NULL FK value is exempt from the constraint. (DuckDB-WASM hangs the
+--    prepared statement on such an FK violation rather than raising.)
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE rule_classification_label (
     rule_id                  UUID NOT NULL REFERENCES rule(id),
     labeler_id               UUID NOT NULL REFERENCES labeler(id),
-    predicted_decision_id    UUID NOT NULL REFERENCES rule_llm_decision(id),
-    predicted_snapshot_hash  BLOB NOT NULL,
+    predicted_decision_id    UUID REFERENCES rule_llm_decision(id),  -- NULL when the rule had no LLM prediction
+    predicted_snapshot_hash  BLOB,                                   -- NULL when the rule had no LLM prediction
     decision                 label_decision NOT NULL DEFAULT 'skip',
     -- Frozen snapshot of the LLM prediction at row creation.
     predicted_prerequisites           TEXT[],
@@ -271,7 +366,41 @@ CREATE INDEX rule_classification_label_labeler_idx  ON rule_classification_label
 CREATE INDEX rule_classification_label_decision_idx ON rule_classification_label (predicted_decision_id);
 
 -- -----------------------------------------------------------------------------
--- 8. Ops / observability — unchanged from v0.3
+-- 8. Human annotations — free-text comments (rule & source block)
+--    A labeler can leave one or more comments on a rule OR on a source block.
+--    Each comment is a JOINT row tying the annotated entity to its labeler, so
+--    "who said what about which rule/block" is queryable. Reads aren't filtered
+--    by labeler (internal tool) — everyone sees everyone's comments, attributed.
+--
+--    These are append-style threads (own UUID PK, many per (entity, labeler)),
+--    NOT a single decision row like the label tables. A labeler may edit/delete
+--    their own comments (updated_at stamps edits).
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE rule_comment (
+    id          UUID PRIMARY KEY DEFAULT uuid(),
+    rule_id     UUID NOT NULL REFERENCES rule(id),
+    labeler_id  UUID NOT NULL REFERENCES labeler(id),
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX rule_comment_rule_idx    ON rule_comment (rule_id, created_at);
+CREATE INDEX rule_comment_labeler_idx ON rule_comment (labeler_id);
+
+CREATE TABLE source_block_comment (
+    id          UUID PRIMARY KEY DEFAULT uuid(),
+    block_id    UUID NOT NULL REFERENCES source_block(id),
+    labeler_id  UUID NOT NULL REFERENCES labeler(id),
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX source_block_comment_block_idx   ON source_block_comment (block_id, created_at);
+CREATE INDEX source_block_comment_labeler_idx ON source_block_comment (labeler_id);
+
+-- -----------------------------------------------------------------------------
+-- 9. Ops / observability — unchanged from v0.3
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE ingestion_run (

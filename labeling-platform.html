@@ -67,12 +67,17 @@
 
       /* Highlight */
       --highlight-yellow: #FFF3C4;
+      --highlight-green: #D8F0DD;
 
       /* Status badges */
       --color-success: #DFE6E1;
       --color-success-foreground: #004D1A;
       --color-warning: #E9E3D8;
       --color-warning-foreground: #804200;
+
+      /* Danger — destructive actions (delete) */
+      --danger: #B42318;
+      --danger-light: #FBEAE8;
 
       /* Fonts */
       --font-heading: 'Newsreader', Georgia, serif;
@@ -388,37 +393,47 @@
       text-decoration: none;
     }
     .gh-btn:hover { border-color: var(--accent-gold); }
+    /* Line numbers and code share one grid: each number cell and its code
+       cell land in the same grid row, so a wrapped (multi-visual-row) code
+       line stretches its row and the number stays aligned to the line. */
     .viewer-body {
       flex: 1;
       display: grid;
       grid-template-columns: auto 1fr;
+      align-content: start;
       overflow: auto;
       user-select: text;
     }
-    .line-nums {
+    .viewer-body .ln {
       background: var(--surface-primary);
       border-right: 1px solid var(--border-subtle);
-      padding: 12px 12px 12px 16px;
-      user-select: none;
-    }
-    .line-nums .ln {
       color: var(--fg-tertiary);
-      display: block;
       font-family: var(--font-mono);
       font-size: 13px;
       line-height: 1.7;
       min-width: 24px;
+      padding: 0 12px 0 16px;
       text-align: right;
+      user-select: none;
     }
-    .code-content {
-      padding: 12px 16px;
-    }
+    .viewer-body .ln:first-of-type { padding-top: 12px; }
+    .viewer-body .ln:last-of-type { padding-bottom: 12px; }
     .code-line {
       font-size: 13px;
       line-height: 1.7;
       white-space: pre-wrap;
-      padding: 0 4px;
+      padding: 0 16px;
       border-radius: 2px;
+      min-width: 0;
+    }
+    .code-line:first-of-type { padding-top: 12px; }
+    .code-line:last-of-type { padding-bottom: 12px; }
+    .code-line.rule-line {
+      background: var(--highlight-green);
+      cursor: pointer;
+    }
+    .code-line.rule-line:hover {
+      filter: brightness(0.96);
     }
     .code-line.highlight {
       background: var(--highlight-yellow);
@@ -500,41 +515,123 @@
       color: var(--fg-tertiary);
       cursor: not-allowed;
     }
-    .add-confirm-banner {
-      background: var(--accent-gold-light);
-      border-bottom: 1px solid var(--accent-gold);
+    /* ===== Danger (destructive) buttons + inline delete confirm ===== */
+    .danger-btn {
+      align-items: center;
+      background: var(--danger);
+      border: 1px solid var(--danger);
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      font-weight: 500;
+      gap: 6px;
+      letter-spacing: 0.5px;
+      padding: 6px 12px;
+    }
+    .danger-btn:hover { filter: brightness(0.95); border-color: var(--danger); }
+    .danger-btn.ghost {
+      background: var(--card);
+      border-color: var(--border-subtle);
+      color: var(--danger);
+    }
+    .danger-btn.ghost:hover { background: var(--danger-light); border-color: var(--danger); }
+    .delete-confirm-text {
+      color: var(--danger);
+      font-family: var(--font-caption);
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: auto;
+    }
+
+    /* ===== Add-rule modal ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(26, 26, 26, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 100;
+    }
+    .modal-card {
+      background: var(--card);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      padding: 12px 16px;
+      max-height: 88vh;
+      width: min(560px, 100%);
     }
-    .add-confirm-meta {
+    .modal-header {
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 16px 20px;
+    }
+    .modal-header h3 { font-size: 15px; font-weight: 600; margin: 0; }
+    .modal-sub {
+      color: var(--fg-tertiary);
+      font-family: var(--font-caption);
+      font-size: 11px;
+      letter-spacing: 0.3px;
+    }
+    .modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: auto;
+      padding: 16px 20px;
+    }
+    .modal-field { display: flex; flex-direction: column; gap: 5px; }
+    .modal-label {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .modal-hint {
+      color: var(--fg-tertiary);
+      font-weight: 400;
+      letter-spacing: 0.3px;
+      text-transform: none;
+    }
+    .modal-textarea, .modal-select {
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      font-size: 13px;
+      padding: 7px 9px;
+      resize: vertical;
+      width: 100%;
+    }
+    .modal-textarea:focus, .modal-select:focus { border-color: var(--accent-gold); outline: none; }
+    .modal-axes-title {
       color: var(--fg-secondary);
       font-family: var(--font-caption);
       font-size: 10px;
       font-weight: 600;
-      letter-spacing: 1px;
+      letter-spacing: 0.6px;
+      margin-top: 2px;
       text-transform: uppercase;
     }
-    .add-confirm-text {
-      background: var(--card);
-      border: 1px solid var(--accent-gold);
-      border-radius: 4px;
-      color: var(--fg-primary);
-      font-size: 13px;
-      max-height: 8rem;
-      overflow: auto;
-      padding: 10px 12px;
-      white-space: pre-wrap;
+    .modal-axes-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr 1fr;
     }
-    .add-confirm-actions {
+    .modal-actions {
+      border-top: 1px solid var(--border-subtle);
       display: flex;
       gap: 8px;
       justify-content: flex-end;
-    }
-    .add-confirm-actions button.primary {
-      background: var(--accent-gold);
-      border-color: var(--accent-gold);
+      padding: 14px 20px;
     }
     .rules-list {
       flex: 1;
@@ -580,6 +677,25 @@
       font-family: var(--font-caption);
       font-size: 10px;
       letter-spacing: 0.3px;
+    }
+    .rule-type-badge {
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      margin-right: 6px;
+      padding: 1px 5px;
+      text-transform: uppercase;
+    }
+    .rule-type-badge.rule {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      color: var(--fg-tertiary);
+    }
+    .rule-type-badge.context {
+      background: var(--accent-gold-light);
+      border: 1px solid var(--accent-gold);
+      color: var(--fg-secondary);
     }
     .rule-item.expanded .rule-item-summary {
       width: 100%;
@@ -630,8 +746,7 @@
       font-size: 13px;
       font-weight: 500;
     }
-    .rule-text-box textarea,
-    .rule-text-box input[type="number"] {
+    .rule-text-box textarea {
       background: transparent;
       border: 1px dashed var(--border-strong);
       border-radius: 4px;
@@ -640,16 +755,273 @@
       width: 100%;
       resize: vertical;
     }
-    .rule-text-box .rule-lines-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
     .rule-actions-row {
       align-items: center;
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+    }
+
+    /* ===== Extraction: single-block view + Prev/Next pager ===== */
+    .empty-toggle {
+      align-items: center;
+      color: var(--fg-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      gap: 5px;
+      letter-spacing: 0.3px;
+    }
+    .empty-toggle input { cursor: pointer; margin: 0; accent-color: var(--accent-gold); }
+    .unit-rollup {
+      background: var(--color-warning);
+      border-radius: 4px;
+      color: var(--color-warning-foreground);
+      flex-shrink: 0;
+      font-family: var(--font-caption);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 6px;
+      white-space: nowrap;
+    }
+    .unit-rollup.complete {
+      background: var(--color-success);
+      color: var(--color-success-foreground);
+    }
+    .block-subhead {
+      background: var(--accent-gold-light);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 16px;
+    }
+    .block-subhead-top {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+    }
+    .block-subhead-main {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .block-snippet {
+      color: var(--fg-primary);
+      font-size: 12px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .block-lines {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      letter-spacing: 0.3px;
+    }
+    .block-empty {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .block-empty p { margin: 0; }
+    .block-pager {
+      align-items: center;
+      background: var(--card);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 16px;
+    }
+    .block-nav-btn {
+      align-items: center;
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-primary);
+      cursor: pointer;
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      font-weight: 500;
+      gap: 4px;
+      letter-spacing: 0.3px;
+      padding: 6px 10px;
+    }
+    .block-nav-btn:hover:not(:disabled) { border-color: var(--accent-gold); color: var(--accent-gold); }
+    .block-nav-btn:disabled { color: var(--fg-tertiary); cursor: not-allowed; opacity: 0.5; }
+    .block-position {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 11px;
+      letter-spacing: 0.3px;
+    }
+    .block-edited {
+      color: var(--accent-gold);
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    /* ===== Extraction: rule reason + comments + block annotations ===== */
+    .rule-reason-box {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--accent-gold);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 12px;
+    }
+    .rule-reason-box .caption {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .rule-reason-text {
+      color: var(--fg-primary);
+      font-size: 12px;
+      line-height: 1.5;
+      margin: 0;
+    }
+    .comment-count {
+      align-items: center;
+      color: var(--fg-secondary);
+      display: inline-flex;
+      gap: 3px;
+      margin-left: 8px;
+    }
+    .comment-count .icon { vertical-align: middle; }
+    .rule-comments, .block-comments {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .block-comments { max-height: 220px; overflow-y: auto; }
+    .comment-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .comment-item {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 10px;
+    }
+    .comment-head {
+      align-items: baseline;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+    .comment-author {
+      color: var(--fg-primary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .comment-date {
+      color: var(--fg-tertiary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .comment-body {
+      color: var(--fg-primary);
+      font-size: 12px;
+      line-height: 1.5;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .comment-actions {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .comment-textarea {
+      background: var(--card);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 12px;
+      min-height: 52px;
+      padding: 6px 8px;
+      resize: vertical;
+      width: 100%;
+    }
+    .comment-compose {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .comment-toggle-btn, .block-action-btn {
+      align-items: center;
+      align-self: flex-start;
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      color: var(--fg-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      gap: 5px;
+      letter-spacing: 0.3px;
+      padding: 5px 9px;
+    }
+    .comment-toggle-btn:hover, .block-action-btn:hover {
+      border-color: var(--accent-gold);
+      color: var(--accent-gold);
+    }
+    .link-btn {
+      background: none;
+      border: none;
+      color: var(--fg-secondary);
+      cursor: pointer;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      padding: 0;
+    }
+    .link-btn:hover { color: var(--accent-gold); text-decoration: underline; }
+    .link-btn.danger:hover { color: var(--danger); }
+    .block-subhead-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .block-range-edit {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .block-range-edit label {
+      align-items: center;
+      color: var(--fg-secondary);
+      display: inline-flex;
+      font-family: var(--font-caption);
+      font-size: 11px;
+      gap: 4px;
+    }
+    .block-range-edit input {
+      background: var(--card);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      font-size: 12px;
+      padding: 4px 6px;
+      width: 64px;
     }
 
     /* ===== Classification: sidebar list ===== */
@@ -719,6 +1091,31 @@
       min-height: 0;
       overflow: auto;
       padding: 20px 24px 24px;
+    }
+    .class-rationale {
+      background: var(--card);
+      border: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--accent-gold);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      gap: 4px;
+      margin: 12px 24px 0;
+      padding: 8px 12px;
+    }
+    .class-rationale .caption {
+      color: var(--fg-secondary);
+      font-family: var(--font-caption);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .class-rationale p {
+      color: var(--fg-primary);
+      font-size: 12px;
+      line-height: 1.5;
+      margin: 0;
     }
     .code-section {
       background: var(--card);
@@ -970,6 +1367,16 @@
       color: #FFFFFF;
       border-left: 4px solid #EF5350;
     }
+    /* Auto-dismissing hint toast: hold, then fade out over the last ~1.2s
+       of a 4s lifetime. Pair with a 4s setTimeout that removes it from the
+       DOM so it doesn't linger invisibly. */
+    .toast.fade {
+      animation: toast-fade-out 4s ease forwards;
+    }
+    @keyframes toast-fade-out {
+      0%, 70% { opacity: 1; }
+      100%    { opacity: 0; }
+    }
     .boot-splash {
       align-items: center;
       background: var(--surface-primary);
@@ -1017,6 +1424,10 @@
     import { createRoot } from "react-dom/client";
     import htm from "htm";
     import { MDConnection } from "@motherduck/wasm-client";
+
+    // Tell the boot watchdog (index <script>) that imports resolved and the
+    // module is running — distinguishes a stalled CDN import from a slow connect.
+    window.__moduleStarted = true;
 
     const html = htm.bind(React.createElement);
 
@@ -1144,28 +1555,73 @@
         PRIMARY KEY (rule_id, labeler_id)
       )
     `;
-    const RULE_ORIGINAL_SNAPSHOT_DDL = `
-      CREATE TABLE IF NOT EXISTS rule_original_snapshot (
-        rule_id             VARCHAR PRIMARY KEY,
-        original_rule_text  VARCHAR NOT NULL,
+    // Human annotations (see schema doc §8). App-managed, so — like the label
+    // tables — these use VARCHAR ids and carry NO foreign keys and NO UNIQUE on
+    // mutable columns: an FK or UNIQUE *violation* HANGS the single DuckDB-WASM
+    // connection forever instead of erroring, and a BLOB index would hang on
+    // UPDATE. rule_id / block_id / labeler_id are the VARCHAR forms the reads
+    // already cast UUIDs to. Own-id PK = an append thread (many per entity).
+    const RULE_COMMENT_DDL = `
+      CREATE TABLE IF NOT EXISTS rule_comment (
+        id         VARCHAR PRIMARY KEY,
+        rule_id    VARCHAR NOT NULL,
+        labeler_id VARCHAR NOT NULL,
+        body       VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        updated_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+      )
+    `;
+    // line_start / line_end are editable; original_line_* are the natural key we
+    // find-or-create on (no UNIQUE constraint — a dup would hang; the JS path
+    // pre-checks instead). Neither editable column is indexed (indexed-column
+    // UPDATE hangs), so range edits are safe.
+    const SOURCE_BLOCK_DDL = `
+      CREATE TABLE IF NOT EXISTS source_block (
+        id                  VARCHAR PRIMARY KEY,
+        rules_file_id       VARCHAR NOT NULL,
+        kind                VARCHAR,
+        line_start          INTEGER NOT NULL,
+        line_end            INTEGER NOT NULL,
         original_line_start INTEGER NOT NULL,
         original_line_end   INTEGER NOT NULL,
-        snapshotted_at      TIMESTAMP NOT NULL DEFAULT current_timestamp
+        snippet             VARCHAR,
+        created_at          TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        last_edited_at      TIMESTAMP
       )
     `;
-    const RULE_EDIT_POINTER_DDL = `
-      CREATE TABLE IF NOT EXISTS rule_edit_pointer (
-        rule_id        VARCHAR PRIMARY KEY,
-        labeler_id     VARCHAR NOT NULL,
-        last_edited_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+    const SOURCE_BLOCK_COMMENT_DDL = `
+      CREATE TABLE IF NOT EXISTS source_block_comment (
+        id         VARCHAR PRIMARY KEY,
+        block_id   VARCHAR NOT NULL,
+        labeler_id VARCHAR NOT NULL,
+        body       VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        updated_at TIMESTAMP NOT NULL DEFAULT current_timestamp
       )
     `;
+    // original_rule_text / original_line_* live directly on the pipeline's
+    // `rule` table (the crawler populates them), and rule edits preserve them
+    // via COALESCE — so no snapshot side-table or per-poll backfill is needed.
 
     // =================================================================
     // duckdb/client
     // =================================================================
     let _appConfig = null;
     let _connPromise = null;
+    // Reject (instead of hanging forever) if a connect step stalls — e.g. the
+    // MotherDuck instance is waking from idle, or a worker/network call wedged.
+    function withTimeout(promise, ms, label) {
+      let timer;
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s (idle reconnect?). Reload to retry.`)),
+            ms
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
+    }
     function getConnection() {
       if (_connPromise) return _connPromise;
       _connPromise = (async () => {
@@ -1177,16 +1633,38 @@
           );
         }
         const conn = MDConnection.create({ mdToken: _appConfig.MOTHERDUCK_TOKEN });
-        await conn.isInitialized();
-        await conn.evaluateQuery(`USE ${_appConfig.MOTHERDUCK_DATABASE}`);
+        await withTimeout(conn.isInitialized(), 30000, "MotherDuck init");
+        await withTimeout(conn.evaluateQuery(`USE ${_appConfig.MOTHERDUCK_DATABASE}`), 30000, "MotherDuck connect");
         for (const ddl of [
           LABELER_DDL,
           RULE_EXTRACTION_LABEL_DDL,
           RULE_CLASSIFICATION_LABEL_DDL,
-          RULE_ORIGINAL_SNAPSHOT_DDL,
-          RULE_EDIT_POINTER_DDL,
+          RULE_COMMENT_DDL,
+          SOURCE_BLOCK_DDL,
+          SOURCE_BLOCK_COMMENT_DDL,
         ]) {
-          await conn.evaluateQuery(ddl);
+          await withTimeout(conn.evaluateQuery(ddl), 30000, "MotherDuck schema setup");
+        }
+        // Additive migrations against prod-only pipeline tables. Each is wrapped
+        // in try/catch because a fresh *local* DuckDB has no rules_file/rule
+        // table (the pipeline tables live only in the prod MotherDuck DB) — a
+        // missing table here must not wedge boot.
+        //   • rules_file.missed_rules — the "Add Rule" flow appends a note here.
+        //   • rule.extraction_reason  — the re-extraction crawler emits a short
+        //     reason per rule; the extraction page reads it (read-only in-app).
+        //   • rule.rule_type / rule.execution_guidance — extract-v2 fields. In
+        //     prod they already exist (rule_type is an ENUM; ADD ... IF NOT EXISTS
+        //     no-ops there). The TEXT fallback only materializes on a hypothetical
+        //     older DB, where TEXT holding 'rule'/'context' reads back fine.
+        for (const [sql, label] of [
+          [`ALTER TABLE rules_file ADD COLUMN IF NOT EXISTS missed_rules TEXT`, "missed_rules migration"],
+          [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS extraction_reason TEXT`, "extraction_reason migration"],
+          [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS rule_type TEXT DEFAULT 'rule'`, "rule_type migration"],
+          [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS execution_guidance TEXT`, "execution_guidance migration"],
+        ]) {
+          try {
+            await withTimeout(conn.evaluateQuery(sql), 30000, `MotherDuck ${label}`);
+          } catch (_) { /* table absent locally — skip */ }
         }
         return conn;
       })().catch(err => { _connPromise = null; throw err; });
@@ -1202,19 +1680,23 @@
       const r = await conn.evaluatePreparedStatement(sql, params);
       return r.data ? r.data.toRows() : [];
     }
-    if (typeof window !== "undefined") {
-      window.__evalQuery = evalQuery;
-      window.__evalPrepared = evalPrepared;
-    }
 
     // =================================================================
     // duckdb/queries
     // =================================================================
-    function githubBlobUrl(canonical, commitSha, path) {
+    // Deep-link to the file on the repo's default branch (HEAD). We deliberately
+    // do NOT pin to the crawl's commit_sha: a stored sha/path pair 404s once the
+    // file is renamed or moved, and a reviewer wants the current file anyway.
+    // githubRepoUrl() below is the always-resolves fallback (the repo landing
+    // page) surfaced alongside it, for the case where even HEAD/<path> 404s.
+    function githubBlobUrl(canonical, path) {
       if (!canonical || !path) return null;
       const base = canonical.replace(/\/+$/, "");
-      const ref = commitSha || "HEAD";
-      return `${base}/blob/${ref}/${path.replace(/^\/+/, "")}`;
+      return `${base}/blob/HEAD/${path.replace(/^\/+/, "")}`;
+    }
+    function githubRepoUrl(canonical) {
+      if (!canonical) return null;
+      return canonical.replace(/\/+$/, "");
     }
     function githubRepoLabel(canonical, path) {
       if (!canonical) return path || "";
@@ -1235,13 +1717,11 @@
         SELECT
           f.id::VARCHAR                                              AS document_id,
           f.path                                                     AS source_path,
-          COALESCE(p.owner || '/' || p.name || ':' || f.path, f.path) AS document_name,
+          COALESCE(p.name || '/' || f.path, f.path)                  AS document_name,
           p.canonical_url                                            AS canonical_url,
-          f.commit_sha                                               AS commit_sha,
           f.raw_content                                              AS document_text,
           (SELECT COUNT(*)::INTEGER FROM rule r
-            JOIN rule_llm_decision d ON d.rule_id = r.id
-            WHERE r.rules_file_id = f.id AND d.parse_ok = TRUE) AS rule_count
+            WHERE r.rules_file_id = f.id) AS rule_count
         FROM rules_file f
         LEFT JOIN source_project p ON p.id = f.project_id
         ORDER BY document_name, source_path
@@ -1250,7 +1730,8 @@
         document_id: r.document_id,
         source_path: r.source_path,
         document_name: r.document_name,
-        github_url: githubBlobUrl(r.canonical_url, r.commit_sha, r.source_path),
+        github_url: githubBlobUrl(r.canonical_url, r.source_path),
+        repo_url: githubRepoUrl(r.canonical_url),
         breadcrumb: githubRepoLabel(r.canonical_url, r.source_path),
         document_text: r.document_text ?? "",
         rule_count: Number(r.rule_count ?? 0),
@@ -1263,16 +1744,92 @@
       return lines.map((text, i) => ({ line_number: i + 1, text }));
     }
 
-    async function backfillSnapshots() {
-      await evalQuery(`
-        INSERT INTO rule_original_snapshot (rule_id, original_rule_text, original_line_start, original_line_end)
-        SELECT r.id::VARCHAR, r.rule_text, r.line_start, r.line_end
-        FROM rule r
-        WHERE NOT EXISTS (SELECT 1 FROM rule_original_snapshot s WHERE s.rule_id = r.id::VARCHAR)
-      `);
+    // Segment a document into source-unit blocks and bucket each rule into the
+    // block that contains its line_start. A *source unit* is the contiguous
+    // source block a rule was extracted from — derived client-side, never
+    // stored. Grouping the extraction queue by unit lets a reviewer see every
+    // rule a paragraph produced side by side and spot blocks that produced no
+    // rule at all (a candidate "missed" rule). Returns units in document order,
+    // each { key, lineStart, lineEnd, snippet, rules: [] } (rules array may be
+    // empty — those are the "empty units").
+    function deriveSourceUnits(documentText, rules) {
+      const lines = (documentText || "").replace(/\r/g, "").split("\n");
+      const blocks = [];
+      let para = null;            // accumulating paragraph block (1-based span)
+      let inFence = false;        // inside a ``` / ~~~ fenced code block
+      let fenceStart = null;
+      const flushPara = () => { if (para) { blocks.push(para); para = null; } };
+      for (let i = 0; i < lines.length; i++) {
+        const ln = i + 1;
+        const trimmed = lines[i].trim();
+        const isFence = /^(```|~~~)/.test(trimmed);
+        if (inFence) {
+          // A fenced block (open..close) is ONE block, regardless of blanks.
+          if (isFence) { blocks.push({ lineStart: fenceStart, lineEnd: ln }); inFence = false; fenceStart = null; }
+          continue;
+        }
+        if (isFence) { flushPara(); inFence = true; fenceStart = ln; continue; }
+        if (trimmed === "") { flushPara(); continue; }              // blank ends a paragraph
+        if (/^#{1,6}\s/.test(trimmed)) { flushPara(); blocks.push({ lineStart: ln, lineEnd: ln }); continue; } // heading = own block
+        if (/^([-*+]\s|\d+[.)]\s)/.test(trimmed)) { flushPara(); para = { lineStart: ln, lineEnd: ln }; continue; } // each list item starts a block
+        if (para) para.lineEnd = ln; else para = { lineStart: ln, lineEnd: ln }; // ordinary / continuation line extends it
+      }
+      flushPara();
+      if (inFence && fenceStart != null) blocks.push({ lineStart: fenceStart, lineEnd: lines.length }); // unclosed fence
+
+      const snippetFor = (b) => {
+        let fallback = null;
+        for (let n = b.lineStart; n <= b.lineEnd; n++) {
+          const t = (lines[n - 1] ?? "").trim();
+          if (!t) continue;
+          if (fallback === null) fallback = t;        // first non-blank (e.g. a fence marker)
+          if (!/^(```|~~~)/.test(t)) { fallback = t; break; } // prefer first content line
+        }
+        if (fallback === null) return "(blank)";
+        return fallback.length > 90 ? fallback.slice(0, 90) + "…" : fallback;
+      };
+      const units = blocks.map(b => ({
+        key: `u:${b.lineStart}-${b.lineEnd}`,
+        lineStart: b.lineStart,
+        lineEnd: b.lineEnd,
+        snippet: snippetFor(b),
+        rules: [],
+      }));
+      // Bucket each rule by line_start containment; fall back to the nearest
+      // preceding block (then the first block) when line_start lands in a gap
+      // — a rule span crossing a boundary is assigned by its line_start.
+      const assign = (ln) => {
+        let containing = null, preceding = null;
+        for (const u of units) {
+          if (ln >= u.lineStart && ln <= u.lineEnd) { containing = u; break; }
+          if (u.lineStart <= ln) preceding = u;
+        }
+        return containing || preceding || units[0] || null;
+      };
+      for (const r of rules) {
+        let u = assign(r.line_start);
+        if (!u) {
+          // No document text (units empty) but rules exist — synthesize a unit.
+          const key = `u:${r.line_start}-${r.line_end}`;
+          u = units.find(x => x.key === key);
+          if (!u) { u = { key, lineStart: r.line_start, lineEnd: r.line_end, snippet: (r.rule_text || "").slice(0, 90) || "(rule)", rules: [] }; units.push(u); }
+        }
+        u.rules.push(r);
+      }
+      units.sort((a, b) => a.lineStart - b.lineStart || a.lineEnd - b.lineEnd);
+      return units;
     }
 
-    async function getRulesForDocument(documentId) {
+    async function getRulesForDocument(documentId, labelerId) {
+      // Show EVERY rule extracted from the file (the extraction page reviews
+      // the extraction itself — judged or not). The badge in the file list
+      // counts the same set. original_* lives directly on the `rule` row
+      // (the crawler populates it); COALESCE to the live values for the rare
+      // rule that predates the column. my_extraction_decision is THIS labeler's
+      // extraction-label decision (NULL when unlabeled) — drives the source-unit
+      // "n/m labeled" rollup. Correlated scalar subquery, like the EXISTS checks
+      // in getAllClassificationItems; binds '' for no-labeler (matches nothing,
+      // so every rule reads as unlabeled — a SELECT comparison, never a hang).
       const rows = await evalPrepared(
         `
         SELECT
@@ -1281,19 +1838,20 @@
           r.rule_text,
           r.line_start,
           r.line_end,
-          s.original_rule_text,
-          s.original_line_start,
-          s.original_line_end
+          COALESCE(r.original_rule_text, r.rule_text)   AS original_rule_text,
+          COALESCE(r.original_line_start, r.line_start) AS original_line_start,
+          COALESCE(r.original_line_end, r.line_end)     AS original_line_end,
+          r.extraction_reason       AS extraction_reason,
+          r.rule_type::VARCHAR      AS rule_type,
+          r.execution_guidance      AS execution_guidance,
+          (SELECT el.decision FROM rule_extraction_label el
+             WHERE el.rule_id = r.id::VARCHAR AND el.labeler_id::VARCHAR = ?
+             LIMIT 1)              AS my_extraction_decision
         FROM rule r
-        JOIN rule_original_snapshot s ON s.rule_id = r.id::VARCHAR
         WHERE r.rules_file_id::VARCHAR = ?
-          AND (
-            EXISTS (SELECT 1 FROM rule_llm_decision d WHERE d.rule_id = r.id AND d.parse_ok = TRUE)
-            OR EXISTS (SELECT 1 FROM rule_extraction_label l WHERE l.rule_id = r.id::VARCHAR)
-          )
         ORDER BY r.line_start, r.line_end
         `,
-        [documentId]
+        [labelerId ?? "", documentId]
       );
       return rows.map(r => ({
         rule_id: r.rule_id,
@@ -1304,13 +1862,131 @@
         original_rule_text: r.original_rule_text,
         original_line_start: Number(r.original_line_start),
         original_line_end: Number(r.original_line_end),
+        extraction_reason: r.extraction_reason ?? null,
+        rule_type: r.rule_type ?? "rule",
+        execution_guidance: r.execution_guidance ?? null,
+        my_extraction_decision: r.my_extraction_decision ?? null,
+      }));
+    }
+
+    // --- Human annotations (comments) + source-block range overrides ---------
+    // All three reads are best-effort: a failure (or a brand-new DB still
+    // provisioning) returns an empty Map so the extraction panel still renders.
+    // rule_comment / source_block_comment carry VARCHAR ids (app-managed); the
+    // joins cast the prod UUID side to VARCHAR to match, same as everywhere.
+
+    function commentRowToObj(r) {
+      return {
+        id: r.id,
+        labeler_id: r.labeler_id,
+        author: r.display_name || r.handle || "unknown",
+        body: r.body ?? "",
+        created_at: (r.created_at ?? "").slice(0, 16),
+      };
+    }
+
+    // Map(rule_id -> [comment]) for every rule in a file, oldest first.
+    async function getRuleCommentsForDocument(documentId) {
+      try {
+        const rows = await evalPrepared(
+          `SELECT c.id, c.rule_id AS rule_id, c.labeler_id AS labeler_id,
+                  c.body, c.created_at::VARCHAR AS created_at,
+                  l.handle AS handle, l.display_name AS display_name
+           FROM rule_comment c
+           JOIN rule r ON r.id::VARCHAR = c.rule_id
+           LEFT JOIN labeler l ON l.id::VARCHAR = c.labeler_id
+           WHERE r.rules_file_id::VARCHAR = ?
+           ORDER BY c.created_at`,
+          [documentId]
+        );
+        const m = new Map();
+        for (const r of rows) {
+          if (!m.has(r.rule_id)) m.set(r.rule_id, []);
+          m.get(r.rule_id).push(commentRowToObj(r));
+        }
+        return m;
+      } catch (_) { return new Map(); }
+    }
+
+    // Map(origKey -> { blockId, lineStart, lineEnd }) of persisted range edits,
+    // keyed by the segmenter span ("u:start-end") so it lines up with the
+    // browser-derived unit key. original_line_* is that stable identity.
+    async function getSourceBlockOverridesForDocument(documentId) {
+      try {
+        const rows = await evalPrepared(
+          `SELECT id, line_start, line_end, original_line_start, original_line_end
+           FROM source_block WHERE rules_file_id = ?`,
+          [documentId]
+        );
+        const m = new Map();
+        for (const r of rows) {
+          m.set(`u:${Number(r.original_line_start)}-${Number(r.original_line_end)}`, {
+            blockId: r.id,
+            lineStart: Number(r.line_start),
+            lineEnd: Number(r.line_end),
+          });
+        }
+        return m;
+      } catch (_) { return new Map(); }
+    }
+
+    // Map(origKey -> [comment]) for source-block comments in a file. Joined back
+    // to the block's original span so it keys off the derived unit, same as the
+    // overrides map.
+    async function getSourceBlockCommentsForDocument(documentId) {
+      try {
+        const rows = await evalPrepared(
+          `SELECT c.id, c.block_id AS block_id, c.labeler_id AS labeler_id,
+                  c.body, c.created_at::VARCHAR AS created_at,
+                  b.original_line_start AS original_line_start,
+                  b.original_line_end   AS original_line_end,
+                  l.handle AS handle, l.display_name AS display_name
+           FROM source_block_comment c
+           JOIN source_block b ON b.id = c.block_id
+           LEFT JOIN labeler l ON l.id::VARCHAR = c.labeler_id
+           WHERE b.rules_file_id = ?
+           ORDER BY c.created_at`,
+          [documentId]
+        );
+        const m = new Map();
+        for (const r of rows) {
+          const key = `u:${Number(r.original_line_start)}-${Number(r.original_line_end)}`;
+          if (!m.has(key)) m.set(key, []);
+          m.get(key).push(commentRowToObj(r));
+        }
+        return m;
+      } catch (_) { return new Map(); }
+    }
+
+    // Lighter than listDocuments(): no per-file COUNT(*) subquery (256 of
+    // those over the 12k-row `rule` table is what made the classification
+    // load take ~10s and queue writes behind it). Classification doesn't show
+    // rule counts, so we skip them. raw_content is fetched once per file here
+    // and mapped onto rules — never joined per-rule.
+    async function listDocumentsForClassification() {
+      const rows = await evalQuery(`
+        SELECT
+          f.id::VARCHAR                                              AS document_id,
+          f.path                                                     AS source_path,
+          COALESCE(p.name || '/' || f.path, f.path)                  AS document_name,
+          p.canonical_url                                            AS canonical_url,
+          f.raw_content                                              AS document_text
+        FROM rules_file f
+        LEFT JOIN source_project p ON p.id = f.project_id
+      `);
+      return rows.map(r => ({
+        document_id: r.document_id,
+        source_path: r.source_path,
+        document_name: r.document_name,
+        github_url: githubBlobUrl(r.canonical_url, r.source_path),
+        repo_url: githubRepoUrl(r.canonical_url),
+        document_text: r.document_text ?? "",
       }));
     }
 
     async function getAllClassificationItems() {
-      await backfillSnapshots();
       const [docs, predictions] = await Promise.all([
-        listDocuments(),
+        listDocumentsForClassification(),
         getClassificationPredictions(),
       ]);
       const docById = new Map(docs.map(d => [d.document_id, d]));
@@ -1323,6 +1999,7 @@
           r.line_end
         FROM rule r
         WHERE EXISTS (SELECT 1 FROM rule_llm_decision d WHERE d.rule_id = r.id AND d.parse_ok = TRUE)
+           OR EXISTS (SELECT 1 FROM rule_extraction_label l WHERE l.rule_id = r.id::VARCHAR AND l.decision = 'accept')
         ORDER BY r.rules_file_id, r.line_start, r.line_end
       `);
       const ids = rows.map(r => r.rule_id);
@@ -1335,8 +2012,9 @@
           document_id: doc?.document_id,
           source_path: doc?.source_path ?? "",
           document_name: doc?.document_name ?? "",
-          short_filename: doc?.source_path?.split("/").pop() ?? doc?.source_path ?? "",
+          short_filename: doc?.document_name ?? doc?.source_path ?? "",
           github_url: doc?.github_url ?? null,
+          repo_url: doc?.repo_url ?? null,
           rule_text: r.rule_text,
           line_start: Number(r.line_start),
           line_end: Number(r.line_end),
@@ -1365,7 +2043,8 @@
           ranked.triggers                      AS triggers,
           ranked.ambiguity_level::VARCHAR      AS ambiguity_level,
           COALESCE(ranked.ambiguity_notes, '') AS ambiguity_notes,
-          COALESCE(ranked.confidence, 0.0)     AS confidence
+          COALESCE(ranked.confidence, 0.0)     AS confidence,
+          COALESCE(ranked.rationale, '')       AS rationale
         FROM ranked
         WHERE ranked.rn = 1
       `);
@@ -1393,6 +2072,7 @@
           ambiguity_level: r.ambiguity_level || "",
           ambiguity_notes: r.ambiguity_notes || "",
           confidence: Number(r.confidence ?? 0),
+          rationale: r.rationale || "",
         });
       }
       return out;
@@ -1470,48 +2150,89 @@
       return { id, handle, display_name: displayName };
     }
 
-    async function ensureSnapshotForRule(ruleId) {
-      await evalPrepared(
-        `
-        INSERT INTO rule_original_snapshot (rule_id, original_rule_text, original_line_start, original_line_end)
-        SELECT r.id::VARCHAR, r.rule_text, r.line_start, r.line_end
-        FROM rule r
-        WHERE r.id::VARCHAR = ?
-          AND NOT EXISTS (SELECT 1 FROM rule_original_snapshot s WHERE s.rule_id = ?)
-        `,
-        [ruleId, ruleId]
-      );
-    }
-
-    async function updateRule({ ruleId, ruleText, lineStart, lineEnd, labelerId }) {
-      await ensureSnapshotForRule(ruleId);
+    async function updateRule({ ruleId, ruleText }) {
+      // Labeler text correction: overwrite the live rule_text (+ its normalized
+      // form) and stamp last_edited_at. Any labeler may overwrite; last write
+      // wins (no provenance). The line range stays as the extractor set it, and
+      // original_* is frozen at insert, so both are left untouched.
+      //
+      // rule_text_sha256 is deliberately NOT updated: it is the only INDEXED
+      // column on `rule` (rule_sha_idx), and updating an indexed BLOB column
+      // HANGS the DuckDB-WASM connection forever instead of erroring — the same
+      // hang family as a constraint violation. Confirmed empirically: an UPDATE
+      // that sets rule_text_sha256 wedges the connection and never commits,
+      // while the identical UPDATE without it commits fine. The stored hash
+      // keeps describing the original extraction (original_rule_text is frozen
+      // and preserved), which is what the dedup index is keyed on anyway.
+      // last_edited_by_labeler_id is intentionally NOT set: the live `rule`
+      // table lacks it (schema doc is ahead of prod), same as created_by_labeler_id
+      // in addRule.
       await evalPrepared(
         `UPDATE rule
-         SET rule_text = ?, line_start = ?, line_end = ?,
+         SET rule_text = ?,
              rule_text_norm = lower(regexp_replace(?, '\\s+', ' ', 'g')),
-             rule_text_sha256 = sha256(?)
+             last_edited_at = now()
          WHERE id::VARCHAR = ?`,
-        [ruleText, lineStart, lineEnd, ruleText.trim(), ruleText, ruleId]
-      );
-      await evalPrepared(
-        `INSERT INTO rule_edit_pointer (rule_id, labeler_id, last_edited_at)
-         VALUES (?, ?, now())
-         ON CONFLICT (rule_id) DO UPDATE SET labeler_id = excluded.labeler_id, last_edited_at = excluded.last_edited_at`,
-        [ruleId, labelerId]
+        [ruleText, ruleText.trim(), ruleId]
       );
     }
 
     async function addRule({ rulesFileId, ruleText, lineStart, lineEnd, labelerId }) {
+      // Multiple rules MAY share one line range — the extraction guide (§3.2,
+      // §6.2) splits a compound single line into several rules on the same line,
+      // and a labeler can add another rule to a line that already carries one.
+      // The schema's index on (rules_file_id, original_line_start,
+      // original_line_end) is NON-UNIQUE for exactly this reason, so a duplicate
+      // span is legal: no constraint to trip, no pre-check needed (the INSERT
+      // can't hang on a UNIQUE/FK violation here).
       const newId = crypto.randomUUID();
-      await evalPrepared(
-        `INSERT INTO rule (id, rules_file_id, rule_text, rule_text_norm, rule_text_sha256, line_start, line_end, extractor_version, extracted_at)
-         VALUES (?::UUID, ?::UUID, ?, lower(regexp_replace(?, '\\s+', ' ', 'g')), sha256(?), ?, ?, 'human:add_missing_rule', now())`,
-        [newId, rulesFileId, ruleText, ruleText.trim(), ruleText, lineStart, lineEnd]
+      // Hash in JS + unhex(?). sha256(?) returns VARCHAR; routing a bound param
+      // through it into the BLOB rule_text_sha256 hangs evaluatePreparedStatement.
+      // original_* set inline to the inserted values (this IS the original).
+      const ruleHashHex = await sha256Hex(ruleText);
+      // A manually-added rule is NOT tagged distinctly — it's treated as an
+      // ordinary extracted rule (no separate human/LLM provenance). extractor_version
+      // is NOT NULL with no default, so mirror the value the agent used for THIS
+      // file; the added rule then looks identical to the rest. Fall back to any
+      // existing value (for a file the agent extracted nothing from) and finally
+      // a literal that guards the NOT NULL constraint on a completely empty table
+      // — binding NULL there would HANG the connection, not throw a Binder Error.
+      // created_by_labeler_id is intentionally NOT written: prod lacks it (it's
+      // doc-only) and we no longer mark human-added rules anyway.
+      let extractorVersion = "unknown";
+      const sibling = await evalPrepared(
+        `SELECT extractor_version FROM rule
+         WHERE rules_file_id::VARCHAR = ? AND extractor_version IS NOT NULL
+         LIMIT 1`,
+        [rulesFileId]
       );
+      if (sibling.length) {
+        extractorVersion = sibling[0].extractor_version;
+      } else {
+        const anyRule = await evalQuery(
+          `SELECT extractor_version FROM rule WHERE extractor_version IS NOT NULL LIMIT 1`
+        );
+        if (anyRule.length) extractorVersion = anyRule[0].extractor_version;
+      }
+      // rule_type and execution_guidance are intentionally omitted: the schema
+      // defaults (rule_type 'rule', execution_guidance NULL) are exactly right
+      // for a hand-added rule, and omitting them avoids binding an ENUM-typed
+      // value through a param — the same DuckDB-WASM typed-binding hang we dodge
+      // for rule_text_sha256 above.
       await evalPrepared(
-        `INSERT INTO rule_original_snapshot (rule_id, original_rule_text, original_line_start, original_line_end)
-         VALUES (?, ?, ?, ?)`,
-        [newId, ruleText, lineStart, lineEnd]
+        `INSERT INTO rule (
+            id, rules_file_id, rule_text, rule_text_norm, rule_text_sha256,
+            line_start, line_end,
+            original_rule_text, original_line_start, original_line_end,
+            extractor_version, extracted_at
+         )
+         VALUES (
+            ?::UUID, ?::UUID, ?, lower(regexp_replace(?, '\\s+', ' ', 'g')), unhex(?),
+            ?, ?,
+            ?, ?, ?,
+            ?, now()
+         )`,
+        [newId, rulesFileId, ruleText, ruleText.trim(), ruleHashHex, lineStart, lineEnd, ruleText, lineStart, lineEnd, extractorVersion]
       );
       await evalPrepared(
         `INSERT INTO rule_extraction_label (rule_id, labeler_id, decision)
@@ -1521,31 +2242,99 @@
       return newId;
     }
 
-    async function ensureClassificationRow({ ruleId, labelerId, predictions }) {
-      // Prod schema: rule_id, labeler_id, predicted_decision_id are UUID;
-      // predicted_prerequisites/_enforcement_mechanisms/_triggers are
-      // VARCHAR[]; predicted_ambiguity_level is ENUM; predicted_snapshot_hash
-      // is BLOB NOT NULL. We must bind a value for it — DuckDB-WASM's
-      // evaluatePreparedStatement hangs (instead of throwing) on NOT NULL
-      // violations, which surfaces as a save button stuck on "Saving…".
-      const existing = (await evalPrepared(
-        `SELECT 1 FROM rule_classification_label
-         WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
-        [ruleId, labelerId]
-      ))[0];
-      if (existing) return;
-      const pred = predictions.get(ruleId);
-      if (!pred) {
-        // No prediction exists — synthesize minimal NOT NULL values. This
-        // branch is only hit if the rule was added by hand and never scored.
-        await evalPrepared(
-          `INSERT INTO rule_classification_label
-             (rule_id, labeler_id, predicted_decision_id, predicted_snapshot_hash, decision)
-           VALUES (?::UUID, ?::UUID, ?::UUID, decode(?, 'hex'), 'skip')`,
-          [ruleId, labelerId, "00000000-0000-0000-0000-000000000000", "00"]
-        );
-        return;
-      }
+    // Append a one-line "[skipped_rule] …" record to the source file's
+    // missed_rules log. CONCAT_WS skips a NULL first arg, so the first note on
+    // a file with no log yet is stored without a leading newline.
+    async function appendMissedRuleNote({ rulesFileId, entry }) {
+      await evalPrepared(
+        `UPDATE rules_file
+         SET missed_rules = CONCAT_WS(chr(10), missed_rules, ?)
+         WHERE id::VARCHAR = ?`,
+        [entry, rulesFileId]
+      );
+    }
+
+    // Hard-delete a rule and everything that references it. Children MUST go
+    // first: rule_classification_label, rule_extraction_label, and
+    // rule_llm_decision all FK to rule(id). Deleting the parent while a child
+    // still points at it violates the FK — and DuckDB-WASM HANGS the prepared
+    // statement on a constraint violation instead of throwing, wedging the
+    // single connection. Same-connection ordering guarantees each child
+    // DELETE commits before the parent runs.
+    async function deleteRule({ ruleId }) {
+      await evalPrepared(`DELETE FROM rule_classification_label WHERE rule_id::VARCHAR = ?`, [ruleId]);
+      await evalPrepared(`DELETE FROM rule_extraction_label    WHERE rule_id::VARCHAR = ?`, [ruleId]);
+      await evalPrepared(`DELETE FROM rule_comment             WHERE rule_id = ?`,          [ruleId]);
+      await evalPrepared(`DELETE FROM rule_llm_decision        WHERE rule_id::VARCHAR = ?`, [ruleId]);
+      await evalPrepared(`DELETE FROM rule                     WHERE id::VARCHAR = ?`, [ruleId]);
+    }
+
+    // --- Comment + source-block writes ---------------------------------------
+    // App-managed tables (VARCHAR ids, no FK/UNIQUE), so inserts can't trip the
+    // constraint/indexed-column hang family: every bound value is non-null, ids
+    // are generated here, and no UPDATE touches an indexed column.
+
+    async function addRuleComment({ ruleId, labelerId, body }) {
+      const id = crypto.randomUUID();
+      await evalPrepared(
+        `INSERT INTO rule_comment (id, rule_id, labeler_id, body) VALUES (?, ?, ?, ?)`,
+        [id, ruleId, labelerId, body]
+      );
+      return id;
+    }
+    async function updateCommentBody({ table, id, body }) {
+      // table is a fixed internal literal ('rule_comment' | 'source_block_comment'),
+      // never user input — safe to interpolate.
+      await evalPrepared(
+        `UPDATE ${table} SET body = ?, updated_at = now() WHERE id = ?`,
+        [body, id]
+      );
+    }
+    async function deleteCommentRow({ table, id }) {
+      await evalPrepared(`DELETE FROM ${table} WHERE id = ?`, [id]);
+    }
+
+    // Find-or-create the source_block row for a derived unit, keyed on its
+    // segmenter (original) span. This reuse is intentional: one source_block
+    // per original span, shared by every rule extracted from it (including
+    // same-line compound splits). The span index is deliberately non-unique
+    // (multiple rules may cover one span), so this find-or-create — not a
+    // uniqueness guard — is what keeps blocks deduplicated. Returns the block id.
+    async function ensureSourceBlock({ rulesFileId, origStart, origEnd, lineStart, lineEnd, kind, snippet }) {
+      const found = await evalPrepared(
+        `SELECT id FROM source_block
+         WHERE rules_file_id = ? AND original_line_start = ? AND original_line_end = ?
+         LIMIT 1`,
+        [rulesFileId, origStart, origEnd]
+      );
+      if (found.length) return found[0].id;
+      const id = crypto.randomUUID();
+      await evalPrepared(
+        `INSERT INTO source_block
+           (id, rules_file_id, kind, line_start, line_end, original_line_start, original_line_end, snippet)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, rulesFileId, kind ?? null, lineStart, lineEnd, origStart, origEnd, snippet ?? null]
+      );
+      return id;
+    }
+    async function updateSourceBlockRange({ blockId, lineStart, lineEnd }) {
+      await evalPrepared(
+        `UPDATE source_block SET line_start = ?, line_end = ?, last_edited_at = now() WHERE id = ?`,
+        [lineStart, lineEnd, blockId]
+      );
+    }
+    async function addBlockComment({ blockId, labelerId, body }) {
+      const id = crypto.randomUUID();
+      await evalPrepared(
+        `INSERT INTO source_block_comment (id, block_id, labeler_id, body) VALUES (?, ?, ?, ?)`,
+        [id, blockId, labelerId, body]
+      );
+      return id;
+    }
+
+
+    // Build the frozen prediction snapshot + hash for a rule's INSERT.
+    async function predictedSnapshotArgs(pred) {
       const snapshot = stableStringify({
         prerequisites: pred.prerequisites,
         enforcement_mechanisms: pred.enforcement_mechanisms,
@@ -1553,85 +2342,86 @@
         ambiguity_level: pred.ambiguity_level,
         ambiguity_notes: pred.ambiguity_notes,
       });
-      const snapHash = await sha256Hex(snapshot);
+      return await sha256Hex(snapshot);
+    }
+
+    // SAVE — one INSERT … ON CONFLICT DO UPDATE that writes all corrected_*
+    // axes + decision='accept'. A single round-trip (vs ~13 separate writes)
+    // is critical: the old multi-write save interleaved with the 2s poll on
+    // the single MotherDuck connection and deadlocked it.
+    async function saveClassificationLabel({ ruleId, labelerId, corrected, predictions }) {
+      // predicted_* freezes the LLM prediction the labeler reviewed. But
+      // predicted_decision_id is NOT-NULL-able-now yet still a FOREIGN KEY to
+      // rule_llm_decision(id): rules with no parse_ok prediction (e.g. ones
+      // added via "Add Rule", or accept-only rules) have NO decision row, so we
+      // MUST bind NULL there — a NULL FK value is exempt from the constraint.
+      // Binding a fabricated/nil UUID violates the FK and DuckDB-WASM HANGS the
+      // prepared statement forever instead of throwing (the "stuck on Saving…"
+      // bug). When there's no prediction every predicted_* column is NULL.
+      const pred = predictions.get(ruleId) || null;
+      const hasPred = !!(pred && pred.decision_id);
+      const snapHash = hasPred ? await predictedSnapshotArgs(pred) : null;
       await evalPrepared(
         `INSERT INTO rule_classification_label (
             rule_id, labeler_id,
             predicted_decision_id, predicted_snapshot_hash,
             predicted_prerequisites, predicted_enforcement_mechanisms, predicted_triggers,
             predicted_ambiguity_level, predicted_ambiguity_notes,
+            corrected_prerequisites, corrected_enforcement_mechanisms, corrected_triggers,
+            corrected_ambiguity_level, corrected_ambiguity_notes,
             decision
          ) VALUES (
             ?::UUID, ?::UUID,
             ?::UUID, decode(?, 'hex'),
             from_json(?, '["VARCHAR"]'), from_json(?, '["VARCHAR"]'), from_json(?, '["VARCHAR"]'),
             ?, ?,
-            'skip'
-         )`,
+            from_json(?, '["VARCHAR"]'), from_json(?, '["VARCHAR"]'), from_json(?, '["VARCHAR"]'),
+            ?, ?,
+            'accept'
+         )
+         ON CONFLICT (rule_id, labeler_id) DO UPDATE SET
+            corrected_prerequisites = excluded.corrected_prerequisites,
+            corrected_enforcement_mechanisms = excluded.corrected_enforcement_mechanisms,
+            corrected_triggers = excluded.corrected_triggers,
+            corrected_ambiguity_level = excluded.corrected_ambiguity_level,
+            corrected_ambiguity_notes = excluded.corrected_ambiguity_notes,
+            decision = excluded.decision,
+            updated_at = now()`,
         [
           ruleId, labelerId,
-          pred.decision_id, snapHash,
-          JSON.stringify(pred.prerequisites || []),
-          JSON.stringify(pred.enforcement_mechanisms || []),
-          JSON.stringify(pred.triggers || []),
-          pred.ambiguity_level || null,
-          pred.ambiguity_notes || null,
+          hasPred ? pred.decision_id : null,
+          snapHash,
+          hasPred ? JSON.stringify(pred.prerequisites || []) : null,
+          hasPred ? JSON.stringify(pred.enforcement_mechanisms || []) : null,
+          hasPred ? JSON.stringify(pred.triggers || []) : null,
+          hasPred ? (pred.ambiguity_level || null) : null,
+          hasPred ? (pred.ambiguity_notes || null) : null,
+          JSON.stringify(corrected.prerequisites || []),
+          JSON.stringify(corrected.enforcement_mechanisms || []),
+          JSON.stringify(corrected.triggers || []),
+          corrected.ambiguity_level || null,
+          corrected.ambiguity_notes || null,
         ]
       );
     }
 
-    async function putClassificationDecision({ ruleId, labelerId, decision, predictions }) {
-      await ensureClassificationRow({ ruleId, labelerId, predictions });
+    // SKIP — single upsert that only sets decision='skip', leaving any
+    // corrected_* the labeler may have entered untouched.
+    async function skipClassificationLabel({ ruleId, labelerId, predictions }) {
+      // Same FK guard as saveClassificationLabel: bind NULL predicted_* for
+      // rules with no LLM prediction (the nil UUID would violate the FK to
+      // rule_llm_decision and hang the connection).
+      const pred = predictions.get(ruleId) || null;
+      const hasPred = !!(pred && pred.decision_id);
+      const snapHash = hasPred ? await predictedSnapshotArgs(pred) : null;
       await evalPrepared(
-        `UPDATE rule_classification_label SET decision = ?, updated_at = now()
-         WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
-        [decision, ruleId, labelerId]
+        `INSERT INTO rule_classification_label (
+            rule_id, labeler_id, predicted_decision_id, predicted_snapshot_hash, decision
+         ) VALUES (?::UUID, ?::UUID, ?::UUID, decode(?, 'hex'), 'skip')
+         ON CONFLICT (rule_id, labeler_id) DO UPDATE SET
+            decision = 'skip', updated_at = now()`,
+        [ruleId, labelerId, hasPred ? pred.decision_id : null, snapHash]
       );
-    }
-
-    const FIELD_NAMES = new Set([
-      "corrected_prerequisites",
-      "corrected_enforcement_mechanisms",
-      "corrected_triggers",
-      "corrected_ambiguity_level",
-      "corrected_ambiguity_notes",
-    ]);
-    const JSON_FIELDS = new Set([
-      "corrected_prerequisites",
-      "corrected_enforcement_mechanisms",
-      "corrected_triggers",
-    ]);
-
-    async function putClassificationField({ ruleId, labelerId, field, value, predictions }) {
-      if (!FIELD_NAMES.has(field)) throw new Error(`unknown field: ${field}`);
-      await ensureClassificationRow({ ruleId, labelerId, predictions });
-      if (value === null || value === undefined) {
-        await evalPrepared(
-          `UPDATE rule_classification_label SET ${field} = NULL, updated_at = now()
-           WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
-          [ruleId, labelerId]
-        );
-        return;
-      }
-      // List-typed fields (corrected_prerequisites / _enforcement_mechanisms /
-      // _triggers) are VARCHAR[] in prod, not JSON. Use from_json(?, ...) to
-      // construct the array. Other fields (ambiguity_level enum, ambiguity_notes)
-      // are scalar; bind as-is.
-      const isList = JSON_FIELDS.has(field);
-      if (isList) {
-        await evalPrepared(
-          `UPDATE rule_classification_label
-             SET ${field} = from_json(?, '["VARCHAR"]'), updated_at = now()
-           WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
-          [JSON.stringify(value), ruleId, labelerId]
-        );
-      } else {
-        await evalPrepared(
-          `UPDATE rule_classification_label SET ${field} = ?, updated_at = now()
-           WHERE rule_id = ?::UUID AND labeler_id = ?::UUID`,
-          [value, ruleId, labelerId]
-        );
-      }
     }
 
     // =================================================================
@@ -1755,15 +2545,19 @@
     // fetching, point at https://unpkg.com/lucide-static/icons/<name>.svg.
     const ChevronDown    = (p) => html`<${Icon} ...${p}><path d="m6 9 6 6 6-6"/><//>`;
     const ChevronRight   = (p) => html`<${Icon} ...${p}><path d="m9 18 6-6-6-6"/><//>`;
+    const ChevronLeft    = (p) => html`<${Icon} ...${p}><path d="m15 18-6-6 6-6"/><//>`;
     const PlusIcon       = (p) => html`<${Icon} ...${p}><path d="M5 12h14"/><path d="M12 5v14"/><//>`;
     const SearchIcon     = (p) => html`<${Icon} ...${p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><//>`;
     const RefreshIcon    = (p) => html`<${Icon} ...${p}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/><//>`;
     const GithubIcon     = (p) => html`<${Icon} ...${p}><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/><//>`;
     const PenLineIcon    = (p) => html`<${Icon} ...${p}><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/><//>`;
+    const TrashIcon      = (p) => html`<${Icon} ...${p}><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><//>`;
     const FileTextIcon   = (p) => html`<${Icon} ...${p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/><//>`;
     const TextSelectIcon = (p) => html`<${Icon} ...${p}><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M21 19a2 2 0 0 1-2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h1"/><path d="M14 3h1"/><path d="M14 21h1"/><path d="M3 9v1"/><path d="M21 9v1"/><path d="M3 14v1"/><path d="M21 14v1"/><path d="M11 8a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2"/><path d="M14 16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2"/><path d="M13 8h-1v8h1"/><//>`;
     const SlidersIcon    = (p) => html`<${Icon} ...${p}><line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/><line x1="14" y1="2" x2="14" y2="6"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="18" x2="16" y2="22"/><//>`;
     const ExternalLinkIcon = (p) => html`<${Icon} ...${p}><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><//>`;
+    // lucide "message-square" — the comment glyph, matching the .pen design system.
+    const CommentIcon    = (p) => html`<${Icon} ...${p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><//>`;
 
     // =================================================================
     // Hooks
@@ -1800,11 +2594,44 @@
       const [docQuery, setDocQuery] = useState("");
       const [activeDocId, setActiveDocId] = useState("");
       const [rules, setRules] = useState([]);
+      const [rulesLoading, setRulesLoading] = useState(false);
       const [expandedRuleId, setExpandedRuleId] = useState("");
+      // Source-block paging: the right panel shows exactly ONE block at a time.
+      // activeUnitKey is the block currently shown (and highlighted in the
+      // viewer); the labeler moves between blocks with the Prev/Next pager or by
+      // clicking a line in the source body. showEmptyUnits widens the paged set
+      // to include blocks with no extracted rule (the missed-rule affordance).
+      const [activeUnitKey, setActiveUnitKey] = useState("");
+      const [showEmptyUnits, setShowEmptyUnits] = useState(false);
       const [pending, setPending] = useState(null);
       const [confirmingAdd, setConfirmingAdd] = useState(null);
       const [toast, setToast] = useState("");
       const [editMode, setEditMode] = useState(null);
+      const [deletingRuleId, setDeletingRuleId] = useState("");
+      // Human annotations, loaded per document alongside the rules.
+      // commentsByRule: Map(rule_id -> [comment]); blockComments: Map(unitKey ->
+      // [comment]); blockOverrides: Map(unitKey -> {blockId,lineStart,lineEnd}).
+      const [commentsByRule, setCommentsByRule] = useState(() => new Map());
+      const [blockComments, setBlockComments] = useState(() => new Map());
+      const [blockOverrides, setBlockOverrides] = useState(() => new Map());
+      // Open composers / inline editors (one at a time each).
+      const [ruleCommentDraft, setRuleCommentDraft] = useState(null);  // { ruleId, text }
+      const [blockCommentDraft, setBlockCommentDraft] = useState(null); // { key, text }
+      const [editingComment, setEditingComment] = useState(null);       // { scope, table, id, text }
+      const [blockRangeEdit, setBlockRangeEdit] = useState(null);       // { key, start, end }
+
+      // Auto-dismiss the toast so transient hints/errors don't linger forever.
+      useEffect(() => {
+        if (!toast) return;
+        const id = setTimeout(() => setToast(""), 4000);
+        return () => clearTimeout(id);
+      }, [toast]);
+
+      // Always reflects the doc the user is currently viewing. loadRules reads
+      // it after its awaits to discard responses for a doc that's no longer
+      // active (slow/out-of-order fetches must not overwrite the live rules).
+      const activeDocIdRef = useRef(activeDocId);
+      useEffect(() => { activeDocIdRef.current = activeDocId; }, [activeDocId]);
 
       const loadDocs = useCallback(async () => {
         try {
@@ -1816,19 +2643,117 @@
 
       const loadRules = useCallback(async () => {
         if (!activeDocId) return;
+        const forDoc = activeDocId;
         try {
-          await backfillSnapshots();
-          const next = await getRulesForDocument(activeDocId);
+          // Rules + their annotations in one batch. Only getRulesForDocument can
+          // reject; the three annotation reads swallow errors into empty Maps,
+          // so a missing/just-provisioned comment table never fails the load.
+          const [next, comments, overrides, blockComm] = await Promise.all([
+            getRulesForDocument(forDoc, labeler?.id ?? ""),
+            getRuleCommentsForDocument(forDoc),
+            getSourceBlockOverridesForDocument(forDoc),
+            getSourceBlockCommentsForDocument(forDoc),
+          ]);
+          // The viewer switches documents synchronously, but this fetch is
+          // async. If the user moved on, dropping the result keeps the rules
+          // panel from rendering the previous file's rules (and line numbers)
+          // against the document now on screen.
+          if (activeDocIdRef.current !== forDoc) return;
           setRules(next);
-        } catch (err) { setToast(`load rules failed: ${err.message ?? err}`); }
-      }, [activeDocId]);
+          setCommentsByRule(comments);
+          setBlockOverrides(overrides);
+          setBlockComments(blockComm);
+        } catch (err) {
+          if (activeDocIdRef.current !== forDoc) return;
+          setToast(`load rules failed: ${err.message ?? err}`);
+        } finally {
+          if (activeDocIdRef.current === forDoc) setRulesLoading(false);
+        }
+      }, [activeDocId, labeler?.id]);
 
       useEffect(() => { loadDocs(); }, [loadDocs]);
+      // On every document switch, immediately drop the old file's rules and any
+      // expansion/selection tied to them so nothing stale paints against the
+      // new document while loadRules is in flight.
+      useEffect(() => {
+        if (!activeDocId) return;
+        setRules([]);
+        setExpandedRuleId("");
+        setPending(null);
+        setRulesLoading(true);
+        setActiveUnitKey("");
+        setCommentsByRule(new Map());
+        setBlockComments(new Map());
+        setBlockOverrides(new Map());
+        setRuleCommentDraft(null);
+        setBlockCommentDraft(null);
+        setEditingComment(null);
+        setBlockRangeEdit(null);
+      }, [activeDocId]);
       useEffect(() => { loadRules(); }, [loadRules]);
-      usePolling(loadRules, POLL_INTERVAL_MS, [activeDocId]);
+      // No background polling — the heavy per-load queries would contend with
+      // in-flight writes on the single wasm connection and deadlock it. Data
+      // refreshes on load, document switch, after each edit (onAfterMutate),
+      // and via the top-bar refresh button.
 
       const activeDoc = useMemo(() => docs.find(d => d.document_id === activeDocId), [docs, activeDocId]);
       const allLines = useMemo(() => sourceLinesFromText(activeDoc?.document_text ?? ""), [activeDoc?.document_text]);
+
+      // Source units, derived from the document text + the rules' line ranges
+      // (no schema change). ruleToUnitKey lets a viewer/rule click mark the
+      // owning unit active; activeUnit drives the block-span highlight.
+      const units = useMemo(() => {
+        const base = deriveSourceUnits(activeDoc?.document_text ?? "", rules);
+        // Apply persisted range edits. The unit key stays the segmenter span
+        // ("u:origStart-origEnd"), so paging/selection are stable across edits;
+        // only the *displayed* range (and thus the viewer highlight) follows the
+        // override. origLine* preserve the segmenter span = the block's identity
+        // and the natural key for find-or-create in source_block.
+        return base.map(u => {
+          const ov = blockOverrides.get(u.key);
+          return {
+            ...u,
+            origLineStart: u.lineStart,
+            origLineEnd: u.lineEnd,
+            lineStart: ov ? ov.lineStart : u.lineStart,
+            lineEnd: ov ? ov.lineEnd : u.lineEnd,
+            blockId: ov ? ov.blockId : null,
+            // "edited" means the range actually diverged from the segmenter
+            // span — a source_block row also exists when a block is only
+            // commented on (range == original), which must NOT count as edited.
+            rangeEdited: ov ? (ov.lineStart !== u.lineStart || ov.lineEnd !== u.lineEnd) : false,
+          };
+        });
+      }, [activeDoc?.document_text, rules, blockOverrides]);
+      const ruleToUnitKey = useMemo(() => {
+        const m = new Map();
+        for (const u of units) for (const r of u.rules) m.set(r.rule_id, u.key);
+        return m;
+      }, [units]);
+      const activeUnit = useMemo(() => units.find(u => u.key === activeUnitKey), [units, activeUnitKey]);
+      // The blocks the Prev/Next pager steps through: those with rules, plus
+      // empty blocks when the labeler opts in. activeUnit itself is resolved
+      // from the full `units` list, so a body-click can open an empty block even
+      // when it isn't part of the paged set.
+      const visibleUnits = useMemo(
+        () => units.filter(u => u.rules.length > 0 || showEmptyUnits),
+        [units, showEmptyUnits]
+      );
+      const nonEmptyUnitCount = useMemo(() => units.filter(u => u.rules.length > 0).length, [units]);
+
+      // Keep an active block selected: default to the first paged block, and
+      // re-anchor whenever the current selection isn't part of the paged set
+      // (doc switch, edit, reload, toggle). A body-click can still open an empty
+      // block off-set — that doesn't change `units`, so this effect won't run
+      // and snap away from it. While rules are still loading every block is
+      // empty (paged set empty), so we hold until the first real block appears.
+      useEffect(() => {
+        setActiveUnitKey(prev => {
+          if (prev && visibleUnits.some(u => u.key === prev)) return prev;
+          if (visibleUnits.length) return visibleUnits[0].key;
+          return prev && units.some(u => u.key === prev) ? prev : "";
+        });
+      }, [units, visibleUnits]);
 
       const filteredDocs = useMemo(() => {
         const q = docQuery.trim().toLowerCase();
@@ -1842,11 +2767,36 @@
       // Live highlight: a pending text-selection trumps the expanded rule.
       // When a labeler expands a rule in the right panel, its lines get
       // highlighted in the viewer and the viewer auto-scrolls to them.
+      // Highlight priority: a live text-selection (Add Rule) trumps an expanded
+      // rule's own span, which trumps the active unit's whole-block span.
       const expandedRule = rules.find(r => r.rule_id === expandedRuleId);
-      const highlightStart = pending?.lineStart ?? expandedRule?.line_start ?? null;
-      const highlightEnd   = pending?.lineEnd   ?? expandedRule?.line_end   ?? null;
+      const highlightStart = pending?.lineStart ?? expandedRule?.line_start ?? activeUnit?.lineStart ?? null;
+      const highlightEnd   = pending?.lineEnd   ?? expandedRule?.line_end   ?? activeUnit?.lineEnd   ?? null;
+
+      // Lines covered by any extracted rule — base light-green highlight.
+      const ruleLineSet = useMemo(() => {
+        const s = new Set();
+        for (const r of rules) {
+          for (let n = r.line_start; n <= r.line_end; n++) s.add(n);
+        }
+        return s;
+      }, [rules]);
+
+      // Maps each covered line → the rule that owns it, so clicking a green
+      // (extracted) line in the viewer can jump to that rule. First rule in
+      // document order wins when ranges overlap.
+      const lineToRuleId = useMemo(() => {
+        const m = new Map();
+        for (const r of rules) {
+          for (let n = r.line_start; n <= r.line_end; n++) {
+            if (!m.has(n)) m.set(n, r.rule_id);
+          }
+        }
+        return m;
+      }, [rules]);
 
       const viewerBodyRef = useRef(null);
+      const rulesListRef = useRef(null);
       useEffect(() => {
         const body = viewerBodyRef.current;
         if (!body || highlightStart == null) return;
@@ -1859,7 +2809,24 @@
         const offsetWithinBody = hlRect.top - bodyRect.top + body.scrollTop;
         const target = offsetWithinBody - body.clientHeight / 2 + hl.clientHeight / 2;
         body.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-      }, [expandedRuleId, pending?.lineStart, activeDocId]);
+      }, [highlightStart, activeDocId]);
+
+      // When a rule becomes selected (e.g. by clicking its line in the viewer),
+      // bring it into view in the rules panel if it's scrolled off — but leave
+      // the scroll alone when it's already visible (e.g. clicked in the panel).
+      useEffect(() => {
+        if (!expandedRuleId) return;
+        const list = rulesListRef.current;
+        if (!list) return;
+        const el = list.querySelector(`[data-rule-id="${expandedRuleId}"]`);
+        if (!el) return;
+        const listRect = list.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        if (elRect.top >= listRect.top && elRect.bottom <= listRect.bottom) return;
+        const offsetWithinList = elRect.top - listRect.top + list.scrollTop;
+        const target = offsetWithinList - list.clientHeight / 2 + el.clientHeight / 2;
+        list.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+      }, [expandedRuleId]);
 
       // Track text selection on the viewer.
       function onViewerMouseUp(event) {
@@ -1883,28 +2850,162 @@
         setPending({ text: text.trim(), lineStart: s, lineEnd: e });
       }
 
+      // The block that owns a given source line: the block whose span contains
+      // it, else the nearest preceding block (units are sorted by lineStart).
+      function unitKeyForLine(ln) {
+        let preceding = null;
+        for (const u of units) {
+          if (ln >= u.lineStart && ln <= u.lineEnd) return u.key;
+          if (u.lineStart <= ln) preceding = u;
+        }
+        return preceding?.key ?? units[0]?.key ?? "";
+      }
+
+      // Click a line in the source body to open its block in the right panel. A
+      // drag-select is owned by the Add-Rule flow (onViewerMouseUp), so only act
+      // on a plain click with no active text selection. Clicking an extracted
+      // (green) line also expands that specific rule within the block.
+      function onViewerClick(event) {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+        let cur = event.target;
+        const container = event.currentTarget;
+        let ln = null;
+        while (cur && cur !== container) {
+          if (cur.dataset?.lineNumber) { ln = Number(cur.dataset.lineNumber); break; }
+          cur = cur.parentNode;
+        }
+        if (ln == null) return;
+        setPending(null);
+        const ruleId = lineToRuleId.get(ln);
+        if (ruleId) {
+          setExpandedRuleId(ruleId);
+          const uk = ruleToUnitKey.get(ruleId);
+          if (uk) setActiveUnitKey(uk);
+        } else {
+          setExpandedRuleId("");
+          const uk = unitKeyForLine(ln);
+          if (uk) setActiveUnitKey(uk);
+        }
+      }
+
+      // --- Source-block paging ----------------------------------------------
+      // Open a block in the panel: clear any rule selection so its whole-block
+      // span drives the viewer highlight.
+      function selectUnit(key) {
+        setPending(null);
+        setExpandedRuleId("");
+        setActiveUnitKey(key);
+      }
+      // Step to the adjacent paged block. When the active block isn't in the
+      // paged set (an empty block opened by a body-click), jump to the nearest
+      // paged block in the requested direction by line position.
+      function gotoAdjacentUnit(dir) {
+        if (!visibleUnits.length) return;
+        const cur = activeUnit;
+        if (!cur) { selectUnit(visibleUnits[0].key); return; }
+        const idx = visibleUnits.findIndex(u => u.key === cur.key);
+        let target;
+        if (idx >= 0) {
+          const ni = idx + dir;
+          if (ni < 0 || ni >= visibleUnits.length) return;
+          target = visibleUnits[ni];
+        } else {
+          target = dir > 0
+            ? visibleUnits.find(u => u.lineStart > cur.lineStart)
+            : [...visibleUnits].reverse().find(u => u.lineStart < cur.lineStart);
+        }
+        if (target) selectUnit(target.key);
+      }
+      // Selecting a rule keeps its block marked active.
+      function selectRule(r, unitKey) {
+        setExpandedRuleId(r.rule_id);
+        if (unitKey) setActiveUnitKey(unitKey);
+      }
+      // Add Rule scoped to a source unit (used for empty units — the missed-rule
+      // affordance). Prefills the unit's line range and seeds the rule text with
+      // the block's source so the labeler can trim it into a directive.
+      function requestAddRuleForUnit(u) {
+        const text = allLines.slice(u.lineStart - 1, u.lineEnd).map(l => l.text).join("\n").trim();
+        setActiveUnitKey(u.key);
+        setConfirmingAdd({
+          text,
+          lineStart: u.lineStart,
+          lineEnd: u.lineEnd,
+          note: "",
+          PREREQUISITE: "",
+          ENFORCEMENT: "",
+          TRIGGERS: "",
+          AMBIGUITY: "",
+          AMBIGUITY_LEVEL: "none",
+        });
+      }
+
       // Step 1: clicking Add Rule. Always allowed; if there's a current text
-      // selection, surface a Confirm/Cancel banner. Otherwise nudge the user
-      // to make a selection first.
+      // selection, open the add-rule modal seeded with the selection plus
+      // empty note + classification-axis drafts. Otherwise nudge the user to
+      // make a selection first.
       function requestAddRule() {
         if (!pending) {
           setToast("Select text in the viewer first, then click Add Rule.");
           return;
         }
-        setConfirmingAdd({ ...pending });
+        setConfirmingAdd({
+          text: pending.text,
+          lineStart: pending.lineStart,
+          lineEnd: pending.lineEnd,
+          note: "",
+          PREREQUISITE: "",
+          ENFORCEMENT: "",
+          TRIGGERS: "",
+          AMBIGUITY: "",
+          AMBIGUITY_LEVEL: "none",
+        });
       }
-      // Step 2: confirming the add — actually INSERT into rule + auto-accept.
+      // Step 2: confirming the add. Three writes in order: (1) INSERT the rule
+      // + auto-accept extraction label, (2) save the human-filled axes as this
+      // labeler's classification label (no LLM prediction), (3) best-effort log
+      // the note on the source file. The note write is wrapped so a failure
+      // there never discards the rule we already inserted.
       async function confirmAddRule() {
         if (!confirmingAdd || !labeler || !activeDoc) return;
+        const c = confirmingAdd;
+        const ruleText = (c.text ?? "").trim();
+        if (!ruleText) { setToast("Rule text can't be empty."); return; }
+        const toList = (v) => (v ?? "").split("\n").map(s => s.trim()).filter(Boolean);
         try {
-          await addRule({
+          const newId = await addRule({
             rulesFileId: activeDoc.document_id,
-            ruleText: confirmingAdd.text,
-            lineStart: confirmingAdd.lineStart,
-            lineEnd: confirmingAdd.lineEnd,
+            ruleText,
+            lineStart: c.lineStart,
+            lineEnd: c.lineEnd,
             labelerId: labeler.id,
           });
-          setToast(`Added rule from L${confirmingAdd.lineStart}–${confirmingAdd.lineEnd}`);
+          // Manual axes → corrected_* with decision='accept'. An empty
+          // predictions Map binds every predicted_* (incl. the FK
+          // predicted_decision_id) to NULL, which the FK guard requires.
+          await saveClassificationLabel({
+            ruleId: newId,
+            labelerId: labeler.id,
+            corrected: {
+              prerequisites: toList(c.PREREQUISITE),
+              enforcement_mechanisms: toList(c.ENFORCEMENT),
+              triggers: toList(c.TRIGGERS),
+              ambiguity_level: c.AMBIGUITY_LEVEL || null,
+              ambiguity_notes: (c.AMBIGUITY ?? "").trim() || null,
+            },
+            predictions: new Map(),
+          });
+          let noteOk = true;
+          const snippet = ruleText.replace(/\s+/g, " ");
+          const entry = `[skipped_rule] L${c.lineStart}–${c.lineEnd} | ${(c.note ?? "").trim() || "(no note)"} | ${snippet}`;
+          try {
+            await appendMissedRuleNote({ rulesFileId: activeDoc.document_id, entry });
+          } catch (noteErr) {
+            noteOk = false;
+            setToast(`Rule added; note not saved: ${noteErr.message ?? noteErr}`);
+          }
+          if (noteOk) setToast(`Added rule from L${c.lineStart}–${c.lineEnd}`);
           setConfirmingAdd(null);
           setPending(null);
           window.getSelection()?.removeAllRanges();
@@ -1918,15 +3019,245 @@
           await updateRule({
             ruleId: rule.rule_id,
             ruleText: next.ruleText,
-            lineStart: next.lineStart,
-            lineEnd: next.lineEnd,
-            labelerId: labeler.id,
           });
           setToast("Saved rule edit");
           setEditMode(null);
           await loadRules();
         } catch (err) { setToast(`save failed: ${err.message ?? err}`); }
       }
+
+      // Hard-delete a rule from the DB (all child rows + the rule itself).
+      async function confirmDeleteRule(rule) {
+        if (!labeler) return;
+        try {
+          await deleteRule({ ruleId: rule.rule_id });
+          setToast("Deleted rule");
+          setDeletingRuleId("");
+          if (expandedRuleId === rule.rule_id) setExpandedRuleId("");
+          if (editMode?.ruleId === rule.rule_id) setEditMode(null);
+          await loadRules();
+        } catch (err) { setToast(`delete failed: ${err.message ?? err}`); }
+      }
+
+      // --- Comment + block-range handlers. Each write reloads via loadRules
+      // (which re-reads rules + all annotations), matching the rule edit flow. ---
+      async function submitRuleComment() {
+        if (!ruleCommentDraft || !labeler) return;
+        const body = (ruleCommentDraft.text ?? "").trim();
+        if (!body) { setToast("Comment can't be empty."); return; }
+        try {
+          await addRuleComment({ ruleId: ruleCommentDraft.ruleId, labelerId: labeler.id, body });
+          setRuleCommentDraft(null);
+          await loadRules();
+        } catch (err) { setToast(`comment failed: ${err.message ?? err}`); }
+      }
+      async function submitBlockComment() {
+        if (!blockCommentDraft || !labeler || !activeDoc) return;
+        const u = activeUnit;
+        if (!u || u.key !== blockCommentDraft.key) return;
+        const body = (blockCommentDraft.text ?? "").trim();
+        if (!body) { setToast("Comment can't be empty."); return; }
+        try {
+          const blockId = await ensureSourceBlock({
+            rulesFileId: activeDoc.document_id,
+            origStart: u.origLineStart, origEnd: u.origLineEnd,
+            lineStart: u.lineStart, lineEnd: u.lineEnd, kind: null, snippet: u.snippet,
+          });
+          await addBlockComment({ blockId, labelerId: labeler.id, body });
+          setBlockCommentDraft(null);
+          await loadRules();
+        } catch (err) { setToast(`comment failed: ${err.message ?? err}`); }
+      }
+      async function submitCommentEdit() {
+        if (!editingComment) return;
+        const body = (editingComment.text ?? "").trim();
+        if (!body) { setToast("Comment can't be empty."); return; }
+        try {
+          await updateCommentBody({ table: editingComment.table, id: editingComment.id, body });
+          setEditingComment(null);
+          await loadRules();
+        } catch (err) { setToast(`edit failed: ${err.message ?? err}`); }
+      }
+      async function removeComment(table, id) {
+        try {
+          await deleteCommentRow({ table, id });
+          if (editingComment?.id === id) setEditingComment(null);
+          await loadRules();
+        } catch (err) { setToast(`delete failed: ${err.message ?? err}`); }
+      }
+      async function submitBlockRange() {
+        if (!blockRangeEdit || !activeDoc) return;
+        const u = activeUnit;
+        if (!u || u.key !== blockRangeEdit.key) return;
+        const start = Number(blockRangeEdit.start), end = Number(blockRangeEdit.end);
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+          setToast("Enter a valid line range (start ≤ end)."); return;
+        }
+        try {
+          const blockId = await ensureSourceBlock({
+            rulesFileId: activeDoc.document_id,
+            origStart: u.origLineStart, origEnd: u.origLineEnd,
+            lineStart: u.lineStart, lineEnd: u.lineEnd, kind: null, snippet: u.snippet,
+          });
+          await updateSourceBlockRange({ blockId, lineStart: start, lineEnd: end });
+          setBlockRangeEdit(null);
+          await loadRules();
+        } catch (err) { setToast(`range save failed: ${err.message ?? err}`); }
+      }
+
+      // Existing comments for a rule or block. table is the fixed source table
+      // ('rule_comment' | 'source_block_comment'); a labeler may edit/delete
+      // only their own rows (compared by labeler_id).
+      const renderCommentList = (list, table) => {
+        if (!list || !list.length) return null;
+        return html`
+          <div className="comment-list">
+            ${list.map(c => {
+              const mine = c.labeler_id === labeler?.id;
+              const isEd = editingComment?.id === c.id;
+              return html`
+                <div key=${c.id} className="comment-item">
+                  <div className="comment-head">
+                    <span className="comment-author">${c.author}</span>
+                    <span className="comment-date">${c.created_at}</span>
+                  </div>
+                  ${isEd ? html`
+                    <textarea className="comment-textarea" value=${editingComment.text}
+                      onChange=${e => setEditingComment({ ...editingComment, text: e.target.value })} />
+                    <div className="comment-actions">
+                      <button onClick=${() => setEditingComment(null)}>Cancel</button>
+                      <button className="primary" onClick=${submitCommentEdit}>Save</button>
+                    </div>
+                  ` : html`
+                    <p className="comment-body">${c.body}</p>
+                    ${mine && html`
+                      <div className="comment-actions">
+                        <button className="link-btn"
+                          onClick=${() => setEditingComment({ table, id: c.id, text: c.body })}>Edit</button>
+                        <button className="link-btn danger"
+                          onClick=${() => removeComment(table, c.id)}>Delete</button>
+                      </div>
+                    `}
+                  `}
+                </div>
+              `;
+            })}
+          </div>
+        `;
+      };
+
+      // A single rule row — selectable, expandable, with Change Rule / Delete.
+      // Rendered as a child inside its source unit; unitKey keeps that unit
+      // marked active when this rule is selected.
+      const renderRuleItem = (r, unitKey) => {
+        const isExpanded = r.rule_id === expandedRuleId;
+        const isEditing = editMode?.ruleId === r.rule_id;
+        const cmts = commentsByRule.get(r.rule_id) || [];
+        return html`
+          <div key=${r.rule_id} data-rule-id=${r.rule_id}
+               className=${`rule-item${isExpanded ? " expanded" : ""}`}
+               onClick=${() => !isExpanded && selectRule(r, unitKey)}>
+            <div className="rule-item-summary"
+                 onClick=${() => isExpanded && setExpandedRuleId("")}>
+              <div className="rule-item-summary-content">
+                <span className="rule-item-text">${r.rule_text}</span>
+                <span className="rule-item-meta">
+                  <span className=${`rule-type-badge ${r.rule_type === "context" ? "context" : "rule"}`}>${r.rule_type === "context" ? "context" : "rule"}</span>
+                  Lines ${r.line_start}–${r.line_end}
+                  ${cmts.length > 0 && html`<span className="comment-count" title=${`${cmts.length} comment(s)`}><${CommentIcon} size=${11} /> ${cmts.length}</span>`}
+                </span>
+              </div>
+              ${isExpanded ? html`<${ChevronDown} size=${14} />` : html`<${ChevronRight} size=${14} />`}
+            </div>
+            ${isExpanded && html`
+              <div className="rule-expanded-detail">
+                <div className="rule-uuid-row">
+                  <span className="rule-uuid-label">RULE UUID</span>
+                  <span className="rule-uuid-value">#${r.rule_id.slice(0, 8)}</span>
+                </div>
+                ${r.extraction_reason && html`
+                  <div className="rule-reason-box">
+                    <span className="caption">WHY EXTRACTED</span>
+                    <p className="rule-reason-text">${r.extraction_reason}</p>
+                  </div>
+                `}
+                ${r.execution_guidance && html`
+                  <div className="rule-reason-box">
+                    <span className="caption">EXECUTION GUIDANCE</span>
+                    <p className="rule-reason-text">${r.execution_guidance}</p>
+                  </div>
+                `}
+                ${isEditing && html`
+                  <div className="rule-text-box">
+                    <span className="caption">RULE TEXT</span>
+                    <textarea value=${editMode.ruleText}
+                      onChange=${e => setEditMode({ ...editMode, ruleText: e.target.value })} />
+                  </div>
+                `}
+                <div className="rule-actions-row">
+                  ${isEditing ? html`
+                    <button onClick=${() => setEditMode(null)}>Cancel</button>
+                    <button className="primary" onClick=${() => saveRuleEdit(r, editMode)}>
+                      Save
+                    </button>
+                  ` : deletingRuleId === r.rule_id ? html`
+                    <span className="delete-confirm-text">Delete this rule from the database?</span>
+                    <button onClick=${() => setDeletingRuleId("")}>Cancel</button>
+                    <button className="danger-btn" onClick=${() => confirmDeleteRule(r)}>
+                      <${TrashIcon} size=${12} /> Delete
+                    </button>
+                  ` : html`
+                    <button className="add-rule-btn" onClick=${() => { setDeletingRuleId(""); setEditMode({
+                      ruleId: r.rule_id,
+                      ruleText: r.rule_text,
+                    }); }}>
+                      <${PenLineIcon} size=${12} /> Change Rule
+                    </button>
+                    <button className="danger-btn ghost"
+                      title="Delete this rule from the database"
+                      onClick=${() => { setEditMode(null); setDeletingRuleId(r.rule_id); }}>
+                      <${TrashIcon} size=${12} /> Delete
+                    </button>
+                  `}
+                </div>
+                <div className="rule-comments">
+                  ${renderCommentList(cmts, "rule_comment")}
+                  ${ruleCommentDraft?.ruleId === r.rule_id ? html`
+                    <div className="comment-compose">
+                      <textarea className="comment-textarea" placeholder="Add a comment…"
+                        value=${ruleCommentDraft.text}
+                        onChange=${e => setRuleCommentDraft({ ...ruleCommentDraft, text: e.target.value })} />
+                      <div className="comment-actions">
+                        <button onClick=${() => setRuleCommentDraft(null)}>Cancel</button>
+                        <button className="primary" onClick=${submitRuleComment}>Comment</button>
+                      </div>
+                    </div>
+                  ` : html`
+                    <button className="comment-toggle-btn"
+                      onClick=${() => { setEditingComment(null); setRuleCommentDraft({ ruleId: r.rule_id, text: "" }); }}>
+                      <${CommentIcon} size=${13} /> Comment
+                    </button>
+                  `}
+                </div>
+              </div>
+            `}
+          </div>
+        `;
+      };
+
+      // Pager position for the active block within the paged set. A negative
+      // index means the active block is an empty one opened by a body-click and
+      // not part of the paged set; Prev/Next still reach the nearest neighbors.
+      const navIndex = visibleUnits.findIndex(u => u.key === activeUnitKey);
+      const canPrev = !!activeUnit && (navIndex > 0 || (navIndex < 0 && visibleUnits.some(u => u.lineStart < activeUnit.lineStart)));
+      const canNext = !!activeUnit && (navIndex >= 0 ? navIndex < visibleUnits.length - 1 : visibleUnits.some(u => u.lineStart > activeUnit.lineStart));
+      const positionLabel = navIndex >= 0
+        ? `Block ${navIndex + 1} of ${visibleUnits.length}`
+        : activeUnit ? "Empty block" : "—";
+      // Active block's annotations: persisted comments + whether its range was
+      // actually edited (rangeEdited is false for comment-only source_block rows).
+      const blockCmts = activeUnit ? (blockComments.get(activeUnit.key) || []) : [];
+      const blockEdited = !!activeUnit?.rangeEdited;
 
       if (!labeler) {
         return html`<main className="empty-state">Pick a labeler in the top bar to start.</main>`;
@@ -1958,7 +3289,7 @@
                 <button key=${d.document_id}
                   className=${`file-item${d.document_id === activeDocId ? " active" : ""}`}
                   onClick=${() => setActiveDocId(d.document_id)}>
-                  <span className="filename">${d.source_path.split("/").pop()}</span>
+                  <span className="filename">${d.document_name ?? d.source_path.split("/").pop()}</span>
                   <span className="rule-count-badge">${d.rule_count} rule${d.rule_count === 1 ? "" : "s"}</span>
                 </button>
               `)}
@@ -1967,27 +3298,30 @@
 
           <section className="viewer">
             <div className="viewer-header">
-              <div className="viewer-filename">${activeDoc?.source_path?.split("/").pop() ?? "—"}</div>
+              <div className="viewer-filename">${activeDoc?.document_name ?? activeDoc?.source_path?.split("/").pop() ?? "—"}</div>
               <div className="breadcrumb">${activeDoc?.breadcrumb ?? ""}</div>
               ${activeDoc?.github_url && html`
                 <a className="gh-btn" href=${activeDoc.github_url} target="_blank" rel="noreferrer noopener">
-                  <${GithubIcon} size=${14} /> View on GitHub
+                  <${GithubIcon} size=${14} /> View file
+                </a>
+              `}
+              ${activeDoc?.repo_url && html`
+                <a className="gh-btn" href=${activeDoc.repo_url} target="_blank" rel="noreferrer noopener"
+                   title="Repo landing page — always resolves, even if the file link 404s">
+                  <${GithubIcon} size=${14} /> Repo
                 </a>
               `}
             </div>
-            <div className="viewer-body" ref=${viewerBodyRef} onMouseUp=${onViewerMouseUp}>
-              <div className="line-nums">
-                ${allLines.map(l => html`<span key=${l.line_number} className="ln">${l.line_number}</span>`)}
-              </div>
-              <div className="code-content">
-                ${allLines.map(l => {
-                  const isHl = highlightStart != null && l.line_number >= highlightStart && l.line_number <= highlightEnd;
-                  return html`
-                    <div key=${l.line_number} data-line-number=${String(l.line_number)}
-                         className=${`code-line${isHl ? " highlight" : ""}`}>${l.text || " "}</div>
-                  `;
-                })}
-              </div>
+            <div className="viewer-body" ref=${viewerBodyRef} onMouseUp=${onViewerMouseUp} onClick=${onViewerClick}>
+              ${allLines.map(l => {
+                const isHl = highlightStart != null && l.line_number >= highlightStart && l.line_number <= highlightEnd;
+                const isRule = ruleLineSet.has(l.line_number);
+                return [
+                  html`<span key=${"n" + l.line_number} className="ln">${l.line_number}</span>`,
+                  html`<div key=${"c" + l.line_number} data-line-number=${String(l.line_number)}
+                         className=${`code-line${isRule ? " rule-line" : ""}${isHl ? " highlight" : ""}`}>${l.text || " "}</div>`,
+                ];
+              })}
             </div>
             <div className="status-bar">
               <${FileTextIcon} size=${12} />
@@ -2015,81 +3349,165 @@
                 </button>
               </div>
               <div className="header-meta">
-                <span>${rules.length} rule${rules.length === 1 ? "" : "s"} from ${activeDoc?.source_path?.split("/").pop() ?? "—"}</span>
-                <span><${SlidersIcon} size=${14} /></span>
+                <span>${rules.length} rule${rules.length === 1 ? "" : "s"} · ${nonEmptyUnitCount} block${nonEmptyUnitCount === 1 ? "" : "s"}</span>
+                <label className="empty-toggle">
+                  <input type="checkbox" checked=${showEmptyUnits}
+                    onChange=${e => setShowEmptyUnits(e.target.checked)} />
+                  Show empty blocks
+                </label>
               </div>
             </div>
-            ${confirmingAdd && html`
-              <div className="add-confirm-banner">
-                <div className="add-confirm-meta">Add as a rule from Lines ${confirmingAdd.lineStart}–${confirmingAdd.lineEnd}</div>
-                <div className="add-confirm-text">${confirmingAdd.text}</div>
-                <div className="add-confirm-actions">
-                  <button onClick=${() => setConfirmingAdd(null)}>Cancel</button>
-                  <button className="primary" onClick=${confirmAddRule}>Confirm</button>
+            ${activeUnit && html`
+              <div className="block-subhead">
+                <div className="block-subhead-top">
+                  <div className="block-subhead-main">
+                    <span className="block-snippet">${activeUnit.snippet}</span>
+                    <span className="block-lines">
+                      Lines ${activeUnit.lineStart}–${activeUnit.lineEnd}
+                      ${blockEdited && html`<span className="block-edited" title=${`Range edited (segmenter span: ${activeUnit.origLineStart}–${activeUnit.origLineEnd})`}>· edited</span>`}
+                    </span>
+                  </div>
+                  ${activeUnit.rules.length > 0 && html`
+                    <span className=${`unit-rollup${activeUnit.rules.every(r => r.my_extraction_decision) ? " complete" : ""}`}>
+                      ${activeUnit.rules.filter(r => r.my_extraction_decision).length}/${activeUnit.rules.length} labeled
+                    </span>
+                  `}
                 </div>
-              </div>
-            `}
-            <div className="rules-list">
-              ${rules.length === 0 && html`<div className="empty-state">No rules in this file yet.</div>`}
-              ${rules.map(r => {
-                const isExpanded = r.rule_id === expandedRuleId;
-                const isEditing = editMode?.ruleId === r.rule_id;
-                return html`
-                  <div key=${r.rule_id}
-                       className=${`rule-item${isExpanded ? " expanded" : ""}`}
-                       onClick=${() => !isExpanded && setExpandedRuleId(r.rule_id)}>
-                    <div className="rule-item-summary"
-                         onClick=${() => isExpanded && setExpandedRuleId("")}>
-                      <div className="rule-item-summary-content">
-                        <span className="rule-item-text">${r.rule_text}</span>
-                        <span className="rule-item-meta">Lines ${r.line_start}–${r.line_end}</span>
-                      </div>
-                      ${isExpanded ? html`<${ChevronDown} size=${14} />` : html`<${ChevronRight} size=${14} />`}
-                    </div>
-                    ${isExpanded && html`
-                      <div className="rule-expanded-detail">
-                        <div className="rule-uuid-row">
-                          <span className="rule-uuid-label">RULE UUID</span>
-                          <span className="rule-uuid-value">#${r.rule_id.slice(0, 8)}</span>
-                        </div>
-                        ${isEditing && html`
-                          <div className="rule-text-box">
-                            <span className="caption">RULE TEXT</span>
-                            <textarea value=${editMode.ruleText}
-                              onChange=${e => setEditMode({ ...editMode, ruleText: e.target.value })} />
-                            <div className="rule-lines-row">
-                              <input type="number" value=${editMode.lineStart}
-                                onChange=${e => setEditMode({ ...editMode, lineStart: Number(e.target.value) })} />
-                              <input type="number" value=${editMode.lineEnd}
-                                onChange=${e => setEditMode({ ...editMode, lineEnd: Number(e.target.value) })} />
-                            </div>
-                          </div>
-                        `}
-                        <div className="rule-actions-row">
-                          ${isEditing ? html`
-                            <button onClick=${() => setEditMode(null)}>Cancel</button>
-                            <button className="primary" onClick=${() => saveRuleEdit(r, editMode)}>
-                              Save
-                            </button>
-                          ` : html`
-                            <button className="add-rule-btn" onClick=${() => setEditMode({
-                              ruleId: r.rule_id,
-                              ruleText: r.rule_text,
-                              lineStart: r.line_start,
-                              lineEnd: r.line_end,
-                            })}>
-                              <${PenLineIcon} size=${12} /> Change Rule
-                            </button>
-                          `}
+                ${blockRangeEdit?.key === activeUnit.key ? html`
+                  <div className="block-range-edit">
+                    <label>Start <input type="number" min="1" value=${blockRangeEdit.start}
+                      onChange=${e => setBlockRangeEdit({ ...blockRangeEdit, start: e.target.value })} /></label>
+                    <label>End <input type="number" min="1" value=${blockRangeEdit.end}
+                      onChange=${e => setBlockRangeEdit({ ...blockRangeEdit, end: e.target.value })} /></label>
+                    <button onClick=${() => setBlockRangeEdit(null)}>Cancel</button>
+                    <button className="primary" onClick=${submitBlockRange}>Save range</button>
+                  </div>
+                ` : html`
+                  <div className="block-subhead-actions">
+                    <button className="block-action-btn"
+                      onClick=${() => { setBlockCommentDraft(null); setBlockRangeEdit({ key: activeUnit.key, start: activeUnit.lineStart, end: activeUnit.lineEnd }); }}>
+                      <${PenLineIcon} size=${12} /> Edit range
+                    </button>
+                    <button className="block-action-btn"
+                      onClick=${() => { setEditingComment(null); setBlockRangeEdit(null); setBlockCommentDraft({ key: activeUnit.key, text: "" }); }}>
+                      <${CommentIcon} size=${12} /> Comment${blockCmts.length ? ` (${blockCmts.length})` : ""}
+                    </button>
+                  </div>
+                `}
+                ${(blockCmts.length > 0 || blockCommentDraft?.key === activeUnit.key) && html`
+                  <div className="block-comments">
+                    ${renderCommentList(blockCmts, "source_block_comment")}
+                    ${blockCommentDraft?.key === activeUnit.key && html`
+                      <div className="comment-compose">
+                        <textarea className="comment-textarea" placeholder="Comment on this source block…"
+                          value=${blockCommentDraft.text}
+                          onChange=${e => setBlockCommentDraft({ ...blockCommentDraft, text: e.target.value })} />
+                        <div className="comment-actions">
+                          <button onClick=${() => setBlockCommentDraft(null)}>Cancel</button>
+                          <button className="primary" onClick=${submitBlockComment}>Comment</button>
                         </div>
                       </div>
                     `}
                   </div>
-                `;
-              })}
+                `}
+              </div>
+            `}
+            <div className="rules-list" ref=${rulesListRef}>
+              ${rulesLoading
+                ? html`<div className="empty-state">Loading rules…</div>`
+                : rules.length === 0
+                  ? html`<div className="empty-state">No rules in this file yet.</div>`
+                  : !activeUnit
+                    ? html`<div className="empty-state">Click a block in the source to see its rules.</div>`
+                    : activeUnit.rules.length === 0
+                      ? html`<div className="empty-state block-empty">
+                          <p>No rules extracted from this block.</p>
+                          <button className="add-rule-btn" onClick=${() => requestAddRuleForUnit(activeUnit)}>
+                            <${PlusIcon} size=${14} /> Add rule from this block
+                          </button>
+                        </div>`
+                      : activeUnit.rules.map(r => renderRuleItem(r, activeUnit.key))}
+            </div>
+            <div className="block-pager">
+              <button className="block-nav-btn" disabled=${!canPrev}
+                onClick=${() => gotoAdjacentUnit(-1)} title="Previous block">
+                <${ChevronLeft} size=${16} /> Prev
+              </button>
+              <span className="block-position">${positionLabel}</span>
+              <button className="block-nav-btn" disabled=${!canNext}
+                onClick=${() => gotoAdjacentUnit(1)} title="Next block">
+                Next <${ChevronRight} size=${16} />
+              </button>
             </div>
           </aside>
 
+          ${confirmingAdd && html`
+            <div className="modal-overlay" onClick=${() => setConfirmingAdd(null)}>
+              <div className="modal-card" onClick=${e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>Add missing rule</h3>
+                  <span className="modal-sub">Lines ${confirmingAdd.lineStart}–${confirmingAdd.lineEnd} · not extracted by the agent</span>
+                </div>
+                <div className="modal-body">
+                  <label className="modal-field">
+                    <span className="modal-label">RULE TEXT</span>
+                    <textarea className="modal-textarea" rows=${3}
+                      value=${confirmingAdd.text}
+                      onChange=${e => setConfirmingAdd({ ...confirmingAdd, text: e.target.value })} />
+                  </label>
+                  <label className="modal-field">
+                    <span className="modal-label">NOTE <span className="modal-hint">— logged on the source file as a skipped rule</span></span>
+                    <textarea className="modal-textarea" rows=${2}
+                      placeholder="Why did the extractor miss this? Anything reviewers should know…"
+                      value=${confirmingAdd.note}
+                      onChange=${e => setConfirmingAdd({ ...confirmingAdd, note: e.target.value })} />
+                  </label>
+                  <div className="modal-axes-title">Classification — fill what you can</div>
+                  <div className="modal-axes-grid">
+                    <label className="modal-field">
+                      <span className="modal-label">PREREQUISITES <span className="modal-hint">one per line</span></span>
+                      <textarea className="modal-textarea" rows=${2}
+                        value=${confirmingAdd.PREREQUISITE}
+                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, PREREQUISITE: e.target.value })} />
+                    </label>
+                    <label className="modal-field">
+                      <span className="modal-label">ENFORCEMENT <span className="modal-hint">one per line</span></span>
+                      <textarea className="modal-textarea" rows=${2}
+                        value=${confirmingAdd.ENFORCEMENT}
+                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, ENFORCEMENT: e.target.value })} />
+                    </label>
+                    <label className="modal-field">
+                      <span className="modal-label">TRIGGERS <span className="modal-hint">one per line</span></span>
+                      <textarea className="modal-textarea" rows=${2}
+                        value=${confirmingAdd.TRIGGERS}
+                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, TRIGGERS: e.target.value })} />
+                    </label>
+                    <label className="modal-field">
+                      <span className="modal-label">AMBIGUITY LEVEL</span>
+                      <select className="modal-select" value=${confirmingAdd.AMBIGUITY_LEVEL}
+                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, AMBIGUITY_LEVEL: e.target.value })}>
+                        <option value="none">none</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="modal-field">
+                    <span className="modal-label">AMBIGUITY NOTES</span>
+                    <textarea className="modal-textarea" rows=${2}
+                      placeholder="What specifically is ambiguous?"
+                      value=${confirmingAdd.AMBIGUITY}
+                      onChange=${e => setConfirmingAdd({ ...confirmingAdd, AMBIGUITY: e.target.value })} />
+                  </label>
+                </div>
+                <div className="modal-actions">
+                  <button onClick=${() => setConfirmingAdd(null)}>Cancel</button>
+                  <button className="primary" onClick=${confirmAddRule}>Confirm & save</button>
+                </div>
+              </div>
+            </div>
+          `}
           ${toast && html`<div className="toast">${toast}</div>`}
         </main>
       `;
@@ -2133,7 +3551,38 @@
       }, [notify]);
 
       useEffect(() => { loadItems(); }, [loadItems]);
-      usePolling(loadItems, POLL_INTERVAL_MS, []);
+      // No background polling (see ExtractionPage note) — getAllClassificationItems
+      // is heavy and would deadlock against in-flight saves. Refresh on load
+      // and via the top-bar refresh button.
+
+      // After a save/skip we update local state in place rather than re-running
+      // the heavy getAllClassificationItems — that post-write reload was racing
+      // the save on the single wasm connection and hanging it.
+      const applyLocalLabel = useCallback((ruleId, decision, corrected) => {
+        setItems(prev => prev.map(it => {
+          if (it.rule_id !== ruleId) return it;
+          const others = it.labels.filter(l => l.labeler_id !== labeler?.id);
+          return {
+            ...it,
+            labels: [
+              {
+                rule_id: ruleId,
+                labeler_id: labeler?.id,
+                labeler_handle: labeler?.handle,
+                decision,
+                predicted_prerequisites: [], predicted_enforcement_mechanisms: [], predicted_triggers: [],
+                predicted_ambiguity_level: null, predicted_ambiguity_notes: "",
+                corrected_prerequisites: corrected?.prerequisites ?? null,
+                corrected_enforcement_mechanisms: corrected?.enforcement_mechanisms ?? null,
+                corrected_triggers: corrected?.triggers ?? null,
+                corrected_ambiguity_level: corrected?.ambiguity_level ?? null,
+                corrected_ambiguity_notes: corrected?.ambiguity_notes ?? null,
+              },
+              ...others,
+            ],
+          };
+        }));
+      }, [labeler?.id, labeler?.handle]);
 
       const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
@@ -2215,7 +3664,7 @@
               predictions=${predictions}
               expanded=${expanded}
               setExpanded=${setExpanded}
-              onAfterMutate=${loadItems}
+              onLocalLabel=${applyLocalLabel}
               onAdvance=${advance}
               notify=${notify}
             />` : html`<section className="class-main empty-state">No items.</section>`}
@@ -2243,7 +3692,7 @@
       }));
     }
 
-    function ClassificationForm({ item, labelerId, predictions, expanded, setExpanded, onAfterMutate, onAdvance, notify }) {
+    function ClassificationForm({ item, labelerId, predictions, expanded, setExpanded, onLocalLabel, onAdvance, notify }) {
       const myLabel = item.labels.find(l => l.labeler_id === labelerId);
       const codeSnippet = useMemo(
         () => pickHighlightedSnippet(item.document_text, item.line_start, item.line_end),
@@ -2291,25 +3740,25 @@
         return () => clearTimeout(id);
       }, [saveState]);
 
-      // "Save Classification" — commits every corrected_* axis from the
-      // local draft, then sets decision = 'accept'. Done as sequential
-      // putClassificationField calls (the proven per-field path) since
-      // DuckDB-WASM's prepared statement binder doesn't like a single
-      // UPDATE that mixes ?::JSON casts with VARCHAR placeholders.
+      // "Save Classification" — commits every corrected_* axis + decision in
+      // a single INSERT … ON CONFLICT DO UPDATE (saveClassificationLabel).
       async function saveClassification() {
         if (saveState === "saving") return;
         setSaveState("saving");
+        const corrected = {
+          prerequisites: parseList(draft.PREREQUISITE),
+          enforcement_mechanisms: parseList(draft.ENFORCEMENT),
+          triggers: parseList(draft.TRIGGERS),
+          ambiguity_level: draft.AMBIGUITY_LEVEL || null,
+          ambiguity_notes: draft.AMBIGUITY || null,
+        };
         try {
-          const ruleId = item.rule_id;
-          await putClassificationField({ ruleId, labelerId, field: "corrected_prerequisites",          value: parseList(draft.PREREQUISITE), predictions });
-          await putClassificationField({ ruleId, labelerId, field: "corrected_enforcement_mechanisms", value: parseList(draft.ENFORCEMENT),  predictions });
-          await putClassificationField({ ruleId, labelerId, field: "corrected_triggers",               value: parseList(draft.TRIGGERS),     predictions });
-          await putClassificationField({ ruleId, labelerId, field: "corrected_ambiguity_level",        value: draft.AMBIGUITY_LEVEL || null, predictions });
-          await putClassificationField({ ruleId, labelerId, field: "corrected_ambiguity_notes",        value: draft.AMBIGUITY || null,       predictions });
-          await putClassificationDecision({ ruleId, labelerId, decision: "accept", predictions });
+          await saveClassificationLabel({ ruleId: item.rule_id, labelerId, corrected, predictions });
           setSaveState("success");
           notify("success", `Saved classification (${item.rule_text.slice(0, 40)}…)`);
-          await onAfterMutate();
+          // Optimistic local update instead of a heavy re-query (which would
+          // race the write on the single connection). Then advance.
+          onLocalLabel(item.rule_id, "accept", corrected);
           onAdvance(1);
         } catch (err) {
           setSaveState("error");
@@ -2318,11 +3767,10 @@
       }
 
       // Skip — only writes the decision; does NOT persist draft edits.
-      // The draft stays in local state until you navigate away.
       async function skip() {
         try {
-          await putClassificationDecision({ ruleId: item.rule_id, labelerId, decision: "skip", predictions });
-          await onAfterMutate();
+          await skipClassificationLabel({ ruleId: item.rule_id, labelerId, predictions });
+          onLocalLabel(item.rule_id, "skip", null);
           onAdvance(1);
         } catch (err) { notify("error", `Skip failed: ${err.message ?? err}`); }
       }
@@ -2357,6 +3805,13 @@
               </div>
             </div>
           </div>
+
+          ${item.prediction?.rationale && html`
+            <div className="class-rationale">
+              <span className="caption">JUDGE RATIONALE${item.prediction.confidence ? ` · confidence ${item.prediction.confidence.toFixed(2)}` : ""}</span>
+              <p>${item.prediction.rationale}</p>
+            </div>
+          `}
 
           <div className="class-axes-scroll">
             <div className="axis-grid">
