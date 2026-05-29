@@ -634,6 +634,16 @@
       justify-content: flex-end;
       padding: 14px 20px;
     }
+    .rules-list-title {
+      color: var(--fg-tertiary);
+      font-family: var(--font-caption);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 10px 16px 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
     .rules-list {
       flex: 1;
       overflow: auto;
@@ -855,6 +865,52 @@
     .added-rule-text { font-size: 13px; line-height: 1.5; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
     .added-rule-note { color: var(--fg-secondary); font-size: 12px; font-style: italic; margin: 4px 0 0; }
     .block-add-rule { display: flex; justify-content: center; padding: 10px 0 4px; }
+    /* Inline "Add rule" draft — an expanded rule card with two editable fields. */
+    .rule-draft-field { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+    .rule-draft-input {
+      background: var(--card);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 6px 8px;
+      resize: vertical;
+      width: 100%;
+    }
+    .rule-draft-input:focus { border-color: var(--accent-gold); outline: none; }
+    .rule-draft-error { color: var(--danger); font-size: 11px; font-family: var(--font-caption); }
+    .rule-type-toggle {
+      display: inline-flex;
+      gap: 4px;
+      background: var(--bg-subtle, var(--accent-gold-light));
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 2px;
+      width: fit-content;
+    }
+    .rule-type-opt {
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--fg-secondary);
+      cursor: pointer;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 14px;
+      transition: background 140ms ease, color 140ms ease, transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    .rule-type-opt:hover:not(.active) { color: var(--fg-primary); }
+    .rule-type-opt:active { transform: scale(0.97); }
+    .rule-type-opt.active {
+      background: var(--card, #fff);
+      color: var(--fg-primary);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .rule-type-opt { transition: none; }
+    }
     /* Contextual hint anchored to a text selection over non-source lines.
        Enter: strong ease-out, scale 0.96 + slight rise (never from 0); the
        press scales down for tactile feedback. transform-origin top: it sits
@@ -2439,7 +2495,7 @@
       );
     }
 
-    async function addRule({ rulesFileId, ruleText, lineStart, lineEnd, labelerId }) {
+    async function addRule({ rulesFileId, ruleText, extractionReason, ruleType, lineStart, lineEnd, labelerId }) {
       // Multiple rules MAY share one line range — the extraction guide (§3.2,
       // §6.2) splits a compound single line into several rules on the same line,
       // and a labeler can add another rule to a line that already carries one.
@@ -2476,25 +2532,31 @@
         );
         if (anyRule.length) extractorVersion = anyRule[0].extractor_version;
       }
-      // rule_type and execution_guidance are intentionally omitted: the schema
-      // defaults (rule_type 'rule', execution_guidance NULL) are exactly right
-      // for a hand-added rule, and omitting them avoids binding an ENUM-typed
-      // value through a param — the same DuckDB-WASM typed-binding hang we dodge
-      // for rule_text_sha256 above.
+      // rule_type is the labeler's chosen kind ('rule' | 'context'). In prod it's
+      // an ENUM, and binding an ENUM-typed value through a param risks the same
+      // DuckDB-WASM typed-binding hang we dodge for rule_text_sha256 above — so we
+      // interpolate it as a *validated literal* (one of two hardcoded strings,
+      // never free text, so injection-safe), which coerces cleanly into both the
+      // prod ENUM and the local TEXT fallback. execution_guidance stays omitted
+      // (schema default NULL is right for a hand-added rule).
+      const safeRuleType = ruleType === "context" ? "context" : "rule";
+      // extraction_reason carries the reviewer's "why this is a rule" — the same
+      // nullable TEXT column the crawler fills, so the added rule reads identical
+      // to an extracted one (the panel shows it under WHY EXTRACTED).
       await evalPrepared(
         `INSERT INTO rule (
             id, rules_file_id, rule_text, rule_text_norm, rule_text_sha256,
             line_start, line_end,
             original_rule_text, original_line_start, original_line_end,
-            extractor_version, extracted_at
+            extractor_version, extraction_reason, rule_type, extracted_at
          )
          VALUES (
             ?::UUID, ?::UUID, ?, lower(regexp_replace(?, '\\s+', ' ', 'g')), unhex(?),
             ?, ?,
             ?, ?, ?,
-            ?, now()
+            ?, ?, '${safeRuleType}', now()
          )`,
-        [newId, rulesFileId, ruleText, ruleText.trim(), ruleHashHex, lineStart, lineEnd, ruleText, lineStart, lineEnd, extractorVersion]
+        [newId, rulesFileId, ruleText, ruleText.trim(), ruleHashHex, lineStart, lineEnd, ruleText, lineStart, lineEnd, extractorVersion, extractionReason ?? null]
       );
       await evalPrepared(
         `INSERT INTO rule_extraction_label (rule_id, labeler_id, decision)
@@ -2996,6 +3058,7 @@
         setEditingComment(null);
         setBlockRangeEdit(null);
         setDeletingBlockKey("");
+        setConfirmingAdd(null);
       }, [activeDocId]);
       useEffect(() => { loadRules(); }, [loadRules]);
       // No background polling — the heavy per-load queries would contend with
@@ -3304,15 +3367,11 @@
         // manually-added source-block line. Clicking anywhere else does nothing;
         // use a drag selection to turn non-block text into a source block.
         if (!ruleLineSet.has(ln) && !sourceBlockLineSet.has(ln)) return;
+        // Choosing a block never auto-expands a rule — open the block with all
+        // rules collapsed. Expanding a rule is a separate click on its card.
         const ruleId = lineToRuleId.get(ln);
-        if (ruleId) {
-          setExpandedRuleId(ruleId);
-          const uk = ruleToUnitKey.get(ruleId);
-          if (uk) setActiveUnitKey(uk);
-        } else {
-          const u = units.find(x => ln >= x.lineStart && ln <= x.lineEnd);
-          if (u) { setExpandedRuleId(""); setActiveUnitKey(u.key); }
-        }
+        const uk = ruleId ? ruleToUnitKey.get(ruleId) : units.find(x => ln >= x.lineStart && ln <= x.lineEnd)?.key;
+        if (uk) { setExpandedRuleId(""); setActiveUnitKey(uk); }
       }
 
       // --- Source-block paging ----------------------------------------------
@@ -3392,30 +3451,32 @@
 
       // "Add rule": open the (classification-free) composer for a source block,
       // seeded with the block's source text so the reviewer can trim it.
+      // "Add rule": collapse every rule and spawn an inline, empty draft card at
+      // the bottom of the rules column (NOT a modal). The reviewer fills the two
+      // required fields (Rule + Why extracted); nothing is pre-filled.
       function requestAddBlockRule(u) {
         if (!u) return;
-        const text = allLines.slice(u.lineStart - 1, u.lineEnd).map(l => l.text).join("\n").trim();
+        setExpandedRuleId("");
         setActiveUnitKey(u.key);
-        setConfirmingAdd({ blockKey: u.key, text, lineStart: u.lineStart, lineEnd: u.lineEnd, note: "" });
+        setConfirmingAdd({ blockKey: u.key, text: "", reason: "", ruleType: "rule", attempted: false });
       }
 
-      // Confirm "Add rule": ensure the block is a source (find-or-create + stamp),
-      // then store the rule in source_block_rule (span-anchored, exportable).
-      // Confirm "Add rule": the reviewer's rule is written into the prod `rule`
-      // table exactly like an LLM-extracted one (same schema, indistinguishable —
-      // source is known only from the human-added block it sits in). It then
-      // renders via renderRuleItem alongside extracted rules, no special casing.
+      // Confirm the inline draft: both fields are required. The rule is written
+      // into the prod `rule` table exactly like an LLM-extracted one — its reason
+      // goes into extraction_reason — so it reads identically (indistinguishable).
       async function confirmAddBlockRule() {
         if (!confirmingAdd || !labeler || !activeDoc) return;
         const c = confirmingAdd;
         const ruleText = (c.text ?? "").trim();
-        if (!ruleText) { setToast("Rule text can't be empty."); return; }
+        const reason = (c.reason ?? "").trim();
+        if (!ruleText || !reason) { setConfirmingAdd({ ...c, attempted: true }); return; }
         const u = units.find(x => x.key === c.blockKey) || activeUnit;
         if (!u) { setToast("No active block."); return; }
         try {
           await addRule({
             rulesFileId: activeDoc.document_id,
-            ruleText,
+            ruleText, extractionReason: reason,
+            ruleType: c.ruleType,
             lineStart: u.lineStart, lineEnd: u.lineEnd,
             labelerId: labeler.id,
           });
@@ -3863,6 +3924,7 @@
                 `}
               </div>
             `}
+            ${activeUnit && html`<div className="rules-list-title">Rules in this block</div>`}
             <div className="rules-list" ref=${rulesListRef}>
               ${rulesLoading
                 ? html`<div className="empty-state">Loading rules…</div>`
@@ -3873,12 +3935,56 @@
                     </div>`
                   : html`
                       ${activeUnit.rules.map(r => renderRuleItem(r, activeUnit.key))}
-                      ${activeUnit.rules.length === 0 && html`<div className="empty-state block-empty"><p>No rules in this block yet.</p></div>`}
-                      <div className="block-add-rule">
-                        <button className="add-rule-btn" onClick=${() => requestAddBlockRule(activeUnit)}>
-                          <${PlusIcon} size=${14} /> Add rule
-                        </button>
-                      </div>
+                      ${activeUnit.rules.length === 0 && confirmingAdd?.blockKey !== activeUnit.key && html`<div className="empty-state block-empty"><p>No rules in this block yet.</p></div>`}
+                      ${confirmingAdd?.blockKey === activeUnit.key
+                        ? html`
+                            <div className="rule-item expanded rule-item-draft">
+                              <div className="rule-expanded-detail">
+                                <div className="rule-uuid-row">
+                                  <span className="rule-uuid-label">NEW ${confirmingAdd.ruleType === "context" ? "CONTEXT" : "RULE"}</span>
+                                  <span className="rule-uuid-value">Lines ${activeUnit.lineStart}–${activeUnit.lineEnd}</span>
+                                </div>
+                                <div className="rule-draft-field">
+                                  <span className="caption">LABEL</span>
+                                  <div className="rule-type-toggle" role="radiogroup" aria-label="Rule type">
+                                    <button type="button" role="radio"
+                                      aria-checked=${confirmingAdd.ruleType !== "context"}
+                                      className=${`rule-type-opt${confirmingAdd.ruleType !== "context" ? " active" : ""}`}
+                                      onClick=${() => setConfirmingAdd({ ...confirmingAdd, ruleType: "rule" })}>Rule</button>
+                                    <button type="button" role="radio"
+                                      aria-checked=${confirmingAdd.ruleType === "context"}
+                                      className=${`rule-type-opt${confirmingAdd.ruleType === "context" ? " active" : ""}`}
+                                      onClick=${() => setConfirmingAdd({ ...confirmingAdd, ruleType: "context" })}>Context</button>
+                                  </div>
+                                </div>
+                                <label className="rule-draft-field">
+                                  <span className="caption">${confirmingAdd.ruleType === "context" ? "CONTEXT" : "RULE"}</span>
+                                  <textarea className="rule-draft-input" rows=${2} placeholder=${`Write the ${confirmingAdd.ruleType === "context" ? "context" : "rule"}…`}
+                                    value=${confirmingAdd.text}
+                                    onChange=${e => setConfirmingAdd({ ...confirmingAdd, text: e.target.value })} />
+                                  ${confirmingAdd.attempted && !confirmingAdd.text.trim() && html`<span className="rule-draft-error">${confirmingAdd.ruleType === "context" ? "Context" : "Rule"} can't be empty.</span>`}
+                                </label>
+                                <label className="rule-draft-field">
+                                  <span className="caption">WHY EXTRACTED</span>
+                                  <textarea className="rule-draft-input" rows=${2} placeholder=${`Why is this ${confirmingAdd.ruleType === "context" ? "context" : "a rule"}? (the extractor's reason)`}
+                                    value=${confirmingAdd.reason}
+                                    onChange=${e => setConfirmingAdd({ ...confirmingAdd, reason: e.target.value })} />
+                                  ${confirmingAdd.attempted && !confirmingAdd.reason.trim() && html`<span className="rule-draft-error">Reason can't be empty.</span>`}
+                                </label>
+                                <div className="rule-actions-row">
+                                  <button onClick=${() => setConfirmingAdd(null)}>Cancel</button>
+                                  <button className="primary" onClick=${confirmAddBlockRule}>Confirm & save</button>
+                                </div>
+                              </div>
+                            </div>
+                          `
+                        : html`
+                            <div className="block-add-rule">
+                              <button className="add-rule-btn" onClick=${() => requestAddBlockRule(activeUnit)}>
+                                <${PlusIcon} size=${14} /> Add rule
+                              </button>
+                            </div>
+                          `}
                     `}
             </div>
             <div className="block-pager">
@@ -3894,28 +4000,6 @@
             </div>
           </aside>
 
-          ${confirmingAdd && html`
-            <div className="modal-overlay" onClick=${() => setConfirmingAdd(null)}>
-              <div className="modal-card" onClick=${e => e.stopPropagation()}>
-                <div className="modal-header">
-                  <h3>Add rule</h3>
-                  <span className="modal-sub">Lines ${confirmingAdd.lineStart}–${confirmingAdd.lineEnd} · added to this block like an extracted rule</span>
-                </div>
-                <div className="modal-body">
-                  <label className="modal-field">
-                    <span className="modal-label">RULE TEXT</span>
-                    <textarea className="modal-textarea" rows=${3}
-                      value=${confirmingAdd.text}
-                      onChange=${e => setConfirmingAdd({ ...confirmingAdd, text: e.target.value })} />
-                  </label>
-                </div>
-                <div className="modal-actions">
-                  <button onClick=${() => setConfirmingAdd(null)}>Cancel</button>
-                  <button className="primary" onClick=${confirmAddBlockRule}>Confirm & save</button>
-                </div>
-              </div>
-            </div>
-          `}
           ${pendingAddable && html`
             <button className="source-hint" ref=${sourceHintRef}
               style=${{ visibility: "hidden" }}
