@@ -785,21 +785,6 @@
       letter-spacing: 0.3px;
     }
     .empty-toggle input { cursor: pointer; margin: 0; accent-color: var(--accent-gold); }
-    .unit-rollup {
-      background: var(--color-warning);
-      border-radius: 4px;
-      color: var(--color-warning-foreground);
-      flex-shrink: 0;
-      font-family: var(--font-caption);
-      font-size: 10px;
-      font-weight: 500;
-      padding: 2px 6px;
-      white-space: nowrap;
-    }
-    .unit-rollup.complete {
-      background: var(--color-success);
-      color: var(--color-success-foreground);
-    }
     .block-subhead {
       background: var(--accent-gold-light);
       border-bottom: 1px solid var(--border-subtle);
@@ -2095,11 +2080,7 @@
       // the extraction itself — judged or not). The badge in the file list
       // counts the same set. original_* lives directly on the `rule` row
       // (the crawler populates it); COALESCE to the live values for the rare
-      // rule that predates the column. my_extraction_decision is THIS labeler's
-      // extraction-label decision (NULL when unlabeled) — drives the source-unit
-      // "n/m labeled" rollup. Correlated scalar subquery, like the EXISTS checks
-      // in getAllClassificationItems; binds '' for no-labeler (matches nothing,
-      // so every rule reads as unlabeled — a SELECT comparison, never a hang).
+      // rule that predates the column.
       const rows = await evalPrepared(
         `
         SELECT
@@ -2113,15 +2094,12 @@
           COALESCE(r.original_line_end, r.line_end)     AS original_line_end,
           r.extraction_reason       AS extraction_reason,
           r.rule_type::VARCHAR      AS rule_type,
-          r.execution_guidance      AS execution_guidance,
-          (SELECT el.decision FROM rule_extraction_label el
-             WHERE el.rule_id = r.id::VARCHAR AND el.labeler_id::VARCHAR = ?
-             LIMIT 1)              AS my_extraction_decision
+          r.execution_guidance      AS execution_guidance
         FROM rule r
         WHERE r.rules_file_id::VARCHAR = ?
         ORDER BY r.line_start, r.line_end
         `,
-        [labelerId ?? "", documentId]
+        [documentId]
       );
       return rows.map(r => ({
         rule_id: r.rule_id,
@@ -2135,7 +2113,6 @@
         extraction_reason: r.extraction_reason ?? null,
         rule_type: r.rule_type ?? "rule",
         execution_guidance: r.execution_guidance ?? null,
-        my_extraction_decision: r.my_extraction_decision ?? null,
       }));
     }
 
@@ -3867,11 +3844,6 @@
                       ${blockEdited && html`<span className="block-edited" title=${`Range edited (segmenter span: ${activeUnit.origLineStart}–${activeUnit.origLineEnd})`}>· edited</span>`}
                     </span>
                   </div>
-                  ${activeUnit.rules.length > 0 && html`
-                    <span className=${`unit-rollup${activeUnit.rules.every(r => r.my_extraction_decision) ? " complete" : ""}`}>
-                      ${activeUnit.rules.filter(r => r.my_extraction_decision).length}/${activeUnit.rules.length} labeled
-                    </span>
-                  `}
                   <button className="block-del-btn" title="Delete this block and all its rules" aria-label="Delete block"
                     onClick=${() => { setBlockRangeEdit(null); setBlockCommentDraft(null); setDeletingBlockKey(activeUnit.key); }}>
                     <${TrashIcon} size=${15} />
@@ -3930,7 +3902,6 @@
                 ? html`<div className="empty-state">Loading rules…</div>`
                 : !activeUnit
                   ? html`<div className="empty-state block-empty">
-                      <p>Nothing selected.</p>
                       <p className="empty-hint">Click a green block to see its rules, or drag-select source text to add a new block.</p>
                     </div>`
                   : html`
