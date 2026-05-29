@@ -140,7 +140,9 @@ Same master-detail shell, with the **rule body shown as read-only** — if
 boundaries or text need editing, that's the Extraction page's job. The
 latest `parse_ok=TRUE` prediction from `rule_llm_decision` is shown
 read-only in an **LLM Judge** box; the four editable correction fields
-below start blank (no pre-fill):
+below **pre-fill from that prediction** so the labeler edits the model's
+answer down rather than typing from scratch (a previously-saved correction
+for an axis takes precedence — see RUNBOOK § Notes pre-fill with LLM):
 
 - **Prerequisites** — multi-line list ("what info is needed to enforce")
 - **Enforcement mechanisms** — multi-line list ("linter", "regex", "LLM", "bash"…)

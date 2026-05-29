@@ -494,6 +494,7 @@
       justify-content: space-between;
       letter-spacing: 0.3px;
     }
+    .header-hint { color: var(--fg-tertiary); font-style: italic; }
     .add-rule-btn {
       align-items: center;
       background: var(--accent-gold);
@@ -830,6 +831,63 @@
       gap: 12px;
     }
     .block-empty p { margin: 0; }
+    .empty-hint { color: var(--fg-tertiary); font-size: 12px; line-height: 1.5; max-width: 32ch; }
+    /* Reviewer-added rules ("Add rule" on a source block) */
+    .added-rules { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+    .added-rule-item {
+      background: var(--highlight-green);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .added-rule-head { align-items: center; display: flex; gap: 8px; }
+    .added-badge {
+      background: var(--color-success);
+      border-radius: 4px;
+      color: #fff;
+      font-family: var(--font-caption);
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      padding: 1px 6px;
+      text-transform: uppercase;
+    }
+    .added-rule-head .comment-icon-btn { margin-left: auto; }
+    .added-rule-text { font-size: 13px; line-height: 1.5; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
+    .added-rule-note { color: var(--fg-secondary); font-size: 12px; font-style: italic; margin: 4px 0 0; }
+    .block-add-rule { display: flex; justify-content: center; padding: 10px 0 4px; }
+    /* Contextual hint anchored to a text selection over non-source lines.
+       Enter: strong ease-out, scale 0.96 + slight rise (never from 0); the
+       press scales down for tactile feedback. transform-origin top: it sits
+       below the selection and grows toward it. */
+    .source-hint {
+      position: fixed;
+      z-index: 60;
+      transform-origin: top left;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      background: var(--fg-primary);
+      color: var(--surface-primary);
+      border: none;
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-family: var(--font-caption);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.12);
+      transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    @starting-style {
+      .source-hint { opacity: 0; transform: translateY(4px) scale(0.96); }
+    }
+    .source-hint:active { transform: scale(0.97); }
+    @media (prefers-reduced-motion: reduce) {
+      .source-hint { transition: opacity 160ms ease; }
+      @starting-style { .source-hint { opacity: 0; transform: none; } }
+      .source-hint:active { transform: none; }
+    }
     .block-pager {
       align-items: center;
       background: var(--card);
@@ -1010,6 +1068,25 @@
     .comment-icon-btn:hover { background: var(--surface-primary); color: var(--accent-gold); }
     .comment-icon-btn.danger:hover { background: var(--danger-light); color: var(--danger); }
     .block-subhead-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .block-del-btn {
+      align-items: center;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      color: var(--fg-tertiary);
+      cursor: pointer;
+      display: inline-flex;
+      flex: none;
+      padding: 4px;
+      transition: color 0.12s ease, background 0.12s ease;
+    }
+    .block-del-btn:hover { background: var(--danger-light); color: var(--danger); }
+    .block-delete-confirm {
+      align-items: center;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
@@ -1431,7 +1508,7 @@
 
   <script type="module">
     import React, {
-      useState, useEffect, useMemo, useCallback, useContext,
+      useState, useEffect, useLayoutEffect, useMemo, useCallback, useContext,
       createContext, useRef
     } from "react";
     import { createRoot } from "react-dom/client";
@@ -1607,8 +1684,29 @@
         original_line_start INTEGER NOT NULL,
         original_line_end   INTEGER NOT NULL,
         snippet             VARCHAR,
+        added_by_labeler_id VARCHAR,
+        note                VARCHAR,
         created_at          TIMESTAMP NOT NULL DEFAULT current_timestamp,
         last_edited_at      TIMESTAMP
+      )
+    `;
+    // A human-designated rule source: "Add block" sets added_by_labeler_id (and
+    // optional note) on the block, and the rules a reviewer writes for it live in
+    // source_block_rule below. Both are span-anchored (like comments), so they
+    // survive the crawler's re-extraction and export cleanly as the corrective
+    // signal "the extractor missed this block; here are the rules it should yield".
+    const SOURCE_BLOCK_RULE_DDL = `
+      CREATE TABLE IF NOT EXISTS source_block_rule (
+        id            VARCHAR PRIMARY KEY,
+        block_id      VARCHAR NOT NULL,
+        rules_file_id VARCHAR,
+        line_start    INTEGER,
+        line_end      INTEGER,
+        rule_text     VARCHAR NOT NULL,
+        note          VARCHAR,
+        labeler_id    VARCHAR NOT NULL,
+        created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        updated_at    TIMESTAMP NOT NULL DEFAULT current_timestamp
       )
     `;
     const SOURCE_BLOCK_COMMENT_DDL = `
@@ -1673,6 +1771,7 @@
             RULE_COMMENT_DDL,
             SOURCE_BLOCK_DDL,
             SOURCE_BLOCK_COMMENT_DDL,
+            SOURCE_BLOCK_RULE_DDL,
           ]) {
             await withTimeout(conn.evaluateQuery(ddl), 30000, "MotherDuck schema setup");
           }
@@ -1696,6 +1795,9 @@
             [`ALTER TABLE rule_comment ADD COLUMN IF NOT EXISTS rules_file_id VARCHAR`, "rule_comment.rules_file_id migration"],
             [`ALTER TABLE rule_comment ADD COLUMN IF NOT EXISTS line_start INTEGER`, "rule_comment.line_start migration"],
             [`ALTER TABLE rule_comment ADD COLUMN IF NOT EXISTS line_end INTEGER`, "rule_comment.line_end migration"],
+            // source_block "human-added rule source" marker (the "Add block" flow).
+            [`ALTER TABLE source_block ADD COLUMN IF NOT EXISTS added_by_labeler_id VARCHAR`, "source_block.added_by migration"],
+            [`ALTER TABLE source_block ADD COLUMN IF NOT EXISTS note VARCHAR`, "source_block.note migration"],
           ]) {
             try {
               await withTimeout(conn.evaluateQuery(sql), 30000, `MotherDuck ${label}`);
@@ -1903,8 +2005,33 @@
         }
         u.rules.push(r);
       }
-      units.sort((a, b) => a.lineStart - b.lineStart || a.lineEnd - b.lineEnd);
-      return units;
+      // The rule's extracted span is the authoritative source block. The markdown
+      // segmenter can split a heading + its list (or any multi-line region) into
+      // finer blocks than the single rule that covers them — e.g. a "**Foo**:"
+      // line followed by bullets becomes many 1-line blocks, but one CONTEXT rule
+      // spans all of them. So grow each rule-bearing unit to the union of its
+      // rules' spans, then drop the now-empty sub-blocks fully swallowed by it
+      // (those bullets/heading belong to that rule, not genuinely "missed" blocks).
+      for (const u of units) {
+        for (const r of u.rules) {
+          if (r.line_start < u.lineStart) u.lineStart = r.line_start;
+          if (r.line_end   > u.lineEnd)   u.lineEnd   = r.line_end;
+        }
+      }
+      const ruleUnits = units.filter(u => u.rules.length);
+      const kept = units.filter(u =>
+        u.rules.length ||
+        !ruleUnits.some(ru => u.lineStart >= ru.lineStart && u.lineEnd <= ru.lineEnd)
+      );
+      // Re-derive the stable key/snippet from the (possibly grown) span. Skip the
+      // snippet recompute when there's no document text — those units are
+      // synthesized from rules and already carry a rule-text snippet.
+      for (const u of kept) {
+        u.key = `u:${u.lineStart}-${u.lineEnd}`;
+        if (documentText) u.snippet = snippetFor(u);
+      }
+      kept.sort((a, b) => a.lineStart - b.lineStart || a.lineEnd - b.lineEnd);
+      return kept;
     }
 
     async function getRulesForDocument(documentId, labelerId) {
@@ -2015,7 +2142,8 @@
     async function getSourceBlockOverridesForDocument(documentId) {
       try {
         const rows = await evalPrepared(
-          `SELECT id::VARCHAR AS id, line_start, line_end, original_line_start, original_line_end
+          `SELECT id::VARCHAR AS id, line_start, line_end, original_line_start, original_line_end,
+                  added_by_labeler_id::VARCHAR AS added_by, note
            FROM source_block WHERE rules_file_id::VARCHAR = ?`,
           [documentId]
         );
@@ -2025,6 +2153,39 @@
             blockId: r.id,
             lineStart: Number(r.line_start),
             lineEnd: Number(r.line_end),
+            addedBy: r.added_by ?? null,   // set => human-designated rule source ("Add block")
+            note: r.note ?? null,
+          });
+        }
+        return m;
+      } catch (_) { return new Map(); }
+    }
+
+    // Map(origKey -> [addedRule]) of the rules reviewers wrote for "Add block"
+    // sources, keyed by the block's original span like the comments/overrides maps.
+    async function getSourceBlockRulesForDocument(documentId) {
+      try {
+        const rows = await evalPrepared(
+          `SELECT sr.id::VARCHAR AS id, sr.rule_text, sr.note, sr.created_at::VARCHAR AS created_at,
+                  b.original_line_start AS original_line_start, b.original_line_end AS original_line_end,
+                  l.handle AS handle, l.display_name AS display_name
+           FROM source_block_rule sr
+           JOIN source_block b ON b.id::VARCHAR = sr.block_id::VARCHAR
+           LEFT JOIN labeler l ON l.id::VARCHAR = sr.labeler_id
+           WHERE b.rules_file_id::VARCHAR = ?
+           ORDER BY sr.created_at`,
+          [documentId]
+        );
+        const m = new Map();
+        for (const r of rows) {
+          const key = `u:${Number(r.original_line_start)}-${Number(r.original_line_end)}`;
+          if (!m.has(key)) m.set(key, []);
+          m.get(key).push({
+            id: r.id,
+            rule_text: r.rule_text ?? "",
+            note: r.note ?? null,
+            author: r.display_name || r.handle || "unknown",
+            created_at: (r.created_at ?? "").slice(0, 16),
           });
         }
         return m;
@@ -2439,6 +2600,44 @@
       return id;
     }
 
+    // --- "Add block" / "Add rule" (human extraction feedback) -----------------
+    // "Add block": designate a span the extractor skipped as a rule source. Finds
+    // -or-creates the source_block, then stamps added_by_labeler_id (+ optional
+    // note). COALESCE keeps an existing note when none is supplied. added_by /
+    // note are non-indexed, so the UPDATE is hang-safe.
+    async function markBlockAsRuleSource({ rulesFileId, origStart, origEnd, lineStart, lineEnd, snippet, labelerId, note }) {
+      const blockId = await ensureSourceBlock({ rulesFileId, origStart, origEnd, lineStart, lineEnd, kind: null, snippet });
+      await evalPrepared(
+        `UPDATE source_block SET added_by_labeler_id = ?, note = COALESCE(?, note), last_edited_at = now() WHERE id::VARCHAR = ?`,
+        [labelerId, note ?? null, blockId]
+      );
+      return blockId;
+    }
+    // "Add rule": a reviewer's rule for a marked block. Stored in source_block_rule
+    // (NOT the crawler's `rule` table), span-anchored so it survives re-extraction
+    // and exports as the corrective signal for the extraction guide.
+    async function addSourceBlockRule({ blockId, rulesFileId, lineStart, lineEnd, ruleText, note, labelerId }) {
+      const id = crypto.randomUUID();
+      await evalPrepared(
+        `INSERT INTO source_block_rule
+           (id, block_id, rules_file_id, line_start, line_end, rule_text, note, labeler_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, blockId, rulesFileId ?? null, lineStart ?? null, lineEnd ?? null, ruleText, note ?? null, labelerId]
+      );
+      return id;
+    }
+    async function deleteSourceBlockRule({ id }) {
+      await evalPrepared(`DELETE FROM source_block_rule WHERE id::VARCHAR = ?`, [id]);
+    }
+    // Delete a source_block and everything anchored to it. Children (comments,
+    // any legacy block-rules) go first so deleting the parent can't trip an FK
+    // (which DuckDB-WASM hangs on rather than throwing).
+    async function deleteSourceBlock({ blockId }) {
+      await evalPrepared(`DELETE FROM source_block_comment WHERE block_id::VARCHAR = ?`, [blockId]);
+      await evalPrepared(`DELETE FROM source_block_rule    WHERE block_id::VARCHAR = ?`, [blockId]);
+      await evalPrepared(`DELETE FROM source_block         WHERE id::VARCHAR = ?`, [blockId]);
+    }
+
 
     // Build the frozen prediction snapshot + hash for a rule's INSERT.
     async function predictedSnapshotArgs(pred) {
@@ -2706,15 +2905,15 @@
       // Source-block paging: the right panel shows exactly ONE block at a time.
       // activeUnitKey is the block currently shown (and highlighted in the
       // viewer); the labeler moves between blocks with the Prev/Next pager or by
-      // clicking a line in the source body. showEmptyUnits widens the paged set
-      // to include blocks with no extracted rule (the missed-rule affordance).
+      // clicking a green line in the source body. Only rule-bearing or manually
+      // added blocks exist as units — the segmenter's empty blocks are dropped.
       const [activeUnitKey, setActiveUnitKey] = useState("");
-      const [showEmptyUnits, setShowEmptyUnits] = useState(false);
       const [pending, setPending] = useState(null);
       const [confirmingAdd, setConfirmingAdd] = useState(null);
       const [toast, setToast] = useState("");
       const [editMode, setEditMode] = useState(null);
       const [deletingRuleId, setDeletingRuleId] = useState("");
+      const [deletingBlockKey, setDeletingBlockKey] = useState(""); // inline confirm for "delete block"
       // Human annotations, loaded per document alongside the rules.
       // commentsByRule: Map(rule_id -> [comment]); blockComments: Map(unitKey ->
       // [comment]); blockOverrides: Map(unitKey -> {blockId,lineStart,lineEnd}).
@@ -2796,6 +2995,7 @@
         setBlockCommentDraft(null);
         setEditingComment(null);
         setBlockRangeEdit(null);
+        setDeletingBlockKey("");
       }, [activeDocId]);
       useEffect(() => { loadRules(); }, [loadRules]);
       // No background polling — the heavy per-load queries would contend with
@@ -2816,8 +3016,9 @@
         // only the *displayed* range (and thus the viewer highlight) follows the
         // override. origLine* preserve the segmenter span = the block's identity
         // and the natural key for find-or-create in source_block.
-        return base.map(u => {
+        const mapped = base.map(u => {
           const ov = blockOverrides.get(u.key);
+          const addedBy = ov?.addedBy ?? null;   // set => "Add block" marked this a human source
           return {
             ...u,
             origLineStart: u.lineStart,
@@ -2829,8 +3030,63 @@
             // span — a source_block row also exists when a block is only
             // commented on (range == original), which must NOT count as edited.
             rangeEdited: ov ? (ov.lineStart !== u.lineStart || ov.lineEnd !== u.lineEnd) : false,
+            addedBy,
+            blockNote: ov?.note ?? null,
+            // A rule source = the extractor produced rules here, OR a reviewer
+            // designated it via "Add block". (Reviewer-added rules live in the
+            // `rule` table now, so they already count via u.rules.)
+            isRuleSource: u.rules.length > 0 || !!addedBy,
           };
         });
+        // Synthesize units for human source blocks whose span doesn't match any
+        // segmenter block — i.e. arbitrary selections marked via the selection
+        // hint that carry no extracted rule yet. Without this they'd have a
+        // source_block row but no unit to render.
+        const present = new Set(mapped.map(u => u.key));
+        const docLines = (activeDoc?.document_text ?? "").replace(/\r/g, "").split("\n");
+        for (const [key, ov] of blockOverrides) {
+          if (present.has(key) || !ov.addedBy) continue;   // only materialize designated sources
+          const m = key.match(/^u:(\d+)-(\d+)$/);
+          if (!m) continue;
+          const os = Number(m[1]), oe = Number(m[2]);
+          const snippet = (docLines.slice(os - 1, oe).find(t => t.trim()) || "").trim().slice(0, 90) || "(source block)";
+          mapped.push({
+            key, rules: [], snippet,
+            origLineStart: os, origLineEnd: oe,
+            lineStart: ov.lineStart, lineEnd: ov.lineEnd,
+            blockId: ov.blockId,
+            rangeEdited: ov.lineStart !== os || ov.lineEnd !== oe,
+            addedBy: ov.addedBy ?? null, blockNote: ov.note ?? null,
+            isRuleSource: true,
+          });
+        }
+        // Manually-added blocks take precedence over the segmenter's blocks for
+        // bucketing rules. A reviewer can carve a source block INSIDE a region the
+        // segmenter treats as one block (e.g. a fenced ```code``` block): without
+        // this, a rule they add at line 11 inside a 9–27 fence gets bucketed into
+        // the fence block and their carved 11–15 block is left empty. So move any
+        // rule whose start falls in a manual block out of the segmenter block and
+        // into the manual one (the more specific, intended home).
+        const manualUnits = mapped.filter(u => u.addedBy);
+        if (manualUnits.length) {
+          for (const u of mapped) {
+            if (u.addedBy || !u.rules.length) continue;
+            const keep = [];
+            for (const r of u.rules) {
+              const mb = manualUnits.find(m => r.line_start >= m.lineStart && r.line_start <= m.lineEnd);
+              if (mb) mb.rules = [...mb.rules, r];
+              else keep.push(r);
+            }
+            u.rules = keep;
+          }
+          for (const u of mapped) u.isRuleSource = u.rules.length > 0 || !!u.addedBy;
+        }
+        // Only blocks that carry rules or were manually designated are real
+        // "blocks" in the UI — drop the segmenter's empty in-between blocks so
+        // they aren't shown or clickable (they were just LLM segmentation noise).
+        const kept = mapped.filter(u => u.isRuleSource);
+        kept.sort((a, b) => a.lineStart - b.lineStart || a.lineEnd - b.lineEnd);
+        return kept;
       }, [activeDoc?.document_text, rules, blockOverrides]);
       const ruleToUnitKey = useMemo(() => {
         const m = new Map();
@@ -2842,25 +3098,17 @@
       // empty blocks when the labeler opts in. activeUnit itself is resolved
       // from the full `units` list, so a body-click can open an empty block even
       // when it isn't part of the paged set.
-      const visibleUnits = useMemo(
-        () => units.filter(u => u.rules.length > 0 || showEmptyUnits),
-        [units, showEmptyUnits]
-      );
-      const nonEmptyUnitCount = useMemo(() => units.filter(u => u.rules.length > 0).length, [units]);
+      // `units` already excludes empty segmenter blocks, so every unit is paged.
+      const visibleUnits = units;
+      const nonEmptyUnitCount = units.length;
 
-      // Keep an active block selected: default to the first paged block, and
-      // re-anchor whenever the current selection isn't part of the paged set
-      // (doc switch, edit, reload, toggle). A body-click can still open an empty
-      // block off-set — that doesn't change `units`, so this effect won't run
-      // and snap away from it. While rules are still loading every block is
-      // empty (paged set empty), so we hold until the first real block appears.
+      // "Select nothing" by default: never auto-open a block. Keep the current
+      // selection only if it's still a valid block; otherwise select nothing and
+      // let the panel show its hint. The labeler opens a block by clicking a
+      // green line or the Prev/Next pager.
       useEffect(() => {
-        setActiveUnitKey(prev => {
-          if (prev && visibleUnits.some(u => u.key === prev)) return prev;
-          if (visibleUnits.length) return visibleUnits[0].key;
-          return prev && units.some(u => u.key === prev) ? prev : "";
-        });
-      }, [units, visibleUnits]);
+        setActiveUnitKey(prev => (prev && units.some(u => u.key === prev)) ? prev : "");
+      }, [units]);
 
       const filteredDocs = useMemo(() => {
         const q = docQuery.trim().toLowerCase();
@@ -2888,6 +3136,60 @@
         }
         return s;
       }, [rules]);
+
+      // Lines of human-designated source blocks ("Add block") — same green as
+      // extracted rules, but no rule owns them, so they're tracked separately
+      // (the click-to-rule map below stays keyed to real rules only).
+      const sourceBlockLineSet = useMemo(() => {
+        const s = new Set();
+        for (const u of units) {
+          if (!u.isRuleSource || u.rules.length > 0) continue; // extracted lines already in ruleLineSet
+          for (let n = u.lineStart; n <= u.lineEnd; n++) s.add(n);
+        }
+        return s;
+      }, [units]);
+
+      // The selection hint offers to add a source block only when the selection
+      // covers at least one line that isn't already part of a source block —
+      // i.e. "a line/chunk that's currently not a block".
+      const pendingAddable = useMemo(() => {
+        if (!pending) return false;
+        for (let n = pending.lineStart; n <= pending.lineEnd; n++) {
+          if (!ruleLineSet.has(n) && !sourceBlockLineSet.has(n)) return true;
+        }
+        return false;
+      }, [pending, ruleLineSet, sourceBlockLineSet]);
+
+      // Keep the "Add as source block" hint glued to the bottom of its selection's
+      // last line. Reading the live line element each time (and on viewer scroll /
+      // resize) means it follows the line — the viewer auto-scrolls to a fresh
+      // selection, so a position captured at mouseup would otherwise drift away.
+      const sourceHintRef = useRef(null);
+      const positionSourceHint = useCallback(() => {
+        const el = sourceHintRef.current;
+        const body = viewerBodyRef.current;
+        if (!el || !body || !pending) return;
+        const lineEl = body.querySelector(`[data-line-number="${pending.lineEnd}"]`);
+        if (!lineEl) { el.style.visibility = "hidden"; return; }
+        const lr = lineEl.getBoundingClientRect();
+        const br = body.getBoundingClientRect();
+        // Hide if the anchor line scrolled out of the viewer's visible area.
+        if (lr.bottom < br.top || lr.top > br.bottom) { el.style.visibility = "hidden"; return; }
+        el.style.visibility = "visible";
+        el.style.top = `${Math.round(lr.bottom + 4)}px`;
+        el.style.left = `${Math.round(lr.left + 8)}px`;
+      }, [pending]);
+      useLayoutEffect(() => {
+        if (!pendingAddable) return;
+        positionSourceHint();
+        const body = viewerBodyRef.current;
+        body?.addEventListener("scroll", positionSourceHint, { passive: true });
+        window.addEventListener("resize", positionSourceHint);
+        return () => {
+          body?.removeEventListener("scroll", positionSourceHint);
+          window.removeEventListener("resize", positionSourceHint);
+        };
+      }, [pendingAddable, positionSourceHint]);
 
       // Maps each covered line → the rule that owns it, so clicking a green
       // (extracted) line in the viewer can jump to that rule. First rule in
@@ -2937,6 +3239,12 @@
 
       // Track text selection on the viewer.
       function onViewerMouseUp(event) {
+        // A double-click (detail === 2) just auto-selects a word — ignore it so
+        // it doesn't pop the hint on a random token. A drag (detail 1) and a
+        // triple-click (detail 3, selects the whole line/sentence — a useful
+        // browser default for grabbing a line) both flow through to offer
+        // "Add as source block".
+        if (event.detail === 2) { setPending(null); return; }
         const sel = window.getSelection();
         const text = sel?.toString();
         if (!text || !text.trim()) { setPending(null); return; }
@@ -2953,7 +3261,15 @@
         const a = findLn(range.startContainer);
         const b = findLn(range.endContainer);
         if (a == null || b == null) return;
-        const [s, e] = a <= b ? [a, b] : [b, a];
+        let [s, e] = a <= b ? [a, b] : [b, a];
+        // A triple-click selects a single line, but the browser's range ends at
+        // the start of the FOLLOWING line (no content from it is actually
+        // selected), which would read as two lines — pin it to the one line it
+        // began on. A real drag keeps its full multi-line span.
+        if (event.detail >= 3) e = s;
+        // The hint anchors to the selection's last line element (not a captured
+        // rect), so it tracks the line as the viewer auto-scrolls or the user
+        // scrolls — see the positioning effect below.
         setPending({ text: text.trim(), lineStart: s, lineEnd: e });
       }
 
@@ -2982,17 +3298,20 @@
           if (cur.dataset?.lineNumber) { ln = Number(cur.dataset.lineNumber); break; }
           cur = cur.parentNode;
         }
+        setPending(null);   // a plain click dismisses any pending selection / hint
         if (ln == null) return;
-        setPending(null);
+        // Clicks only react on GREEN (determined-block) lines — a rule line or a
+        // manually-added source-block line. Clicking anywhere else does nothing;
+        // use a drag selection to turn non-block text into a source block.
+        if (!ruleLineSet.has(ln) && !sourceBlockLineSet.has(ln)) return;
         const ruleId = lineToRuleId.get(ln);
         if (ruleId) {
           setExpandedRuleId(ruleId);
           const uk = ruleToUnitKey.get(ruleId);
           if (uk) setActiveUnitKey(uk);
         } else {
-          setExpandedRuleId("");
-          const uk = unitKeyForLine(ln);
-          if (uk) setActiveUnitKey(uk);
+          const u = units.find(x => ln >= x.lineStart && ln <= x.lineEnd);
+          if (u) { setExpandedRuleId(""); setActiveUnitKey(u.key); }
         }
       }
 
@@ -3029,95 +3348,83 @@
         setExpandedRuleId(r.rule_id);
         if (unitKey) setActiveUnitKey(unitKey);
       }
-      // Add Rule scoped to a source unit (used for empty units — the missed-rule
-      // affordance). Prefills the unit's line range and seeds the rule text with
-      // the block's source so the labeler can trim it into a directive.
-      function requestAddRuleForUnit(u) {
-        const text = allLines.slice(u.lineStart - 1, u.lineEnd).map(l => l.text).join("\n").trim();
-        setActiveUnitKey(u.key);
-        setConfirmingAdd({
-          text,
-          lineStart: u.lineStart,
-          lineEnd: u.lineEnd,
-          note: "",
-          PREREQUISITE: "",
-          ENFORCEMENT: "",
-          TRIGGERS: "",
-          AMBIGUITY: "",
-          AMBIGUITY_LEVEL: "none",
-        });
+      // "Add block": mark a span the extractor skipped as a human rule source.
+      // Records a source_block stamped with this labeler (turns the lines green)
+      // so the reviewer can then add rules to it. Extraction feedback only — no
+      // classification, and nothing is written to the crawler's `rule` table.
+      async function markBlockSource(u) {
+        if (!u || !labeler || !activeDoc) return;
+        try {
+          await markBlockAsRuleSource({
+            rulesFileId: activeDoc.document_id,
+            origStart: u.origLineStart, origEnd: u.origLineEnd,
+            lineStart: u.lineStart, lineEnd: u.lineEnd, snippet: u.snippet,
+            labelerId: labeler.id, note: null,
+          });
+          setActiveUnitKey(u.key);
+          setToast(`Marked L${u.lineStart}–${u.lineEnd} as a rule source`);
+          await loadRules();
+        } catch (err) { setToast(`add block failed: ${err.message ?? err}`); }
       }
 
-      // Step 1: clicking Add Rule. Always allowed; if there's a current text
-      // selection, open the add-rule modal seeded with the selection plus
-      // empty note + classification-axis drafts. Otherwise nudge the user to
-      // make a selection first.
-      function requestAddRule() {
-        if (!pending) {
-          setToast("Select text in the viewer first, then click Add Rule.");
-          return;
-        }
-        setConfirmingAdd({
-          text: pending.text,
-          lineStart: pending.lineStart,
-          lineEnd: pending.lineEnd,
-          note: "",
-          PREREQUISITE: "",
-          ENFORCEMENT: "",
-          TRIGGERS: "",
-          AMBIGUITY: "",
-          AMBIGUITY_LEVEL: "none",
-        });
+      // Selection-driven "Add block": the primary way to designate a source.
+      // Marks the current text selection's span (which may not align with any
+      // segmenter block) as a human rule source; the units memo synthesizes a
+      // unit for it so it renders green and navigable.
+      async function addSourceFromSelection() {
+        if (!pending || !labeler || !activeDoc) return;
+        const { lineStart, lineEnd } = pending;
+        const snippet = (allLines.slice(lineStart - 1, lineEnd).map(l => l.text).find(t => t.trim()) || "").trim().slice(0, 90) || "(source block)";
+        try {
+          await markBlockAsRuleSource({
+            rulesFileId: activeDoc.document_id,
+            origStart: lineStart, origEnd: lineEnd,
+            lineStart, lineEnd, snippet,
+            labelerId: labeler.id, note: null,
+          });
+          setPending(null);
+          window.getSelection()?.removeAllRanges();
+          setActiveUnitKey(`u:${lineStart}-${lineEnd}`);
+          setToast(`Added source block L${lineStart}–${lineEnd}`);
+          await loadRules();
+        } catch (err) { setToast(`add block failed: ${err.message ?? err}`); }
       }
-      // Step 2: confirming the add. Three writes in order: (1) INSERT the rule
-      // + auto-accept extraction label, (2) save the human-filled axes as this
-      // labeler's classification label (no LLM prediction), (3) best-effort log
-      // the note on the source file. The note write is wrapped so a failure
-      // there never discards the rule we already inserted.
-      async function confirmAddRule() {
+
+      // "Add rule": open the (classification-free) composer for a source block,
+      // seeded with the block's source text so the reviewer can trim it.
+      function requestAddBlockRule(u) {
+        if (!u) return;
+        const text = allLines.slice(u.lineStart - 1, u.lineEnd).map(l => l.text).join("\n").trim();
+        setActiveUnitKey(u.key);
+        setConfirmingAdd({ blockKey: u.key, text, lineStart: u.lineStart, lineEnd: u.lineEnd, note: "" });
+      }
+
+      // Confirm "Add rule": ensure the block is a source (find-or-create + stamp),
+      // then store the rule in source_block_rule (span-anchored, exportable).
+      // Confirm "Add rule": the reviewer's rule is written into the prod `rule`
+      // table exactly like an LLM-extracted one (same schema, indistinguishable —
+      // source is known only from the human-added block it sits in). It then
+      // renders via renderRuleItem alongside extracted rules, no special casing.
+      async function confirmAddBlockRule() {
         if (!confirmingAdd || !labeler || !activeDoc) return;
         const c = confirmingAdd;
         const ruleText = (c.text ?? "").trim();
         if (!ruleText) { setToast("Rule text can't be empty."); return; }
-        const toList = (v) => (v ?? "").split("\n").map(s => s.trim()).filter(Boolean);
+        const u = units.find(x => x.key === c.blockKey) || activeUnit;
+        if (!u) { setToast("No active block."); return; }
         try {
-          const newId = await addRule({
+          await addRule({
             rulesFileId: activeDoc.document_id,
             ruleText,
-            lineStart: c.lineStart,
-            lineEnd: c.lineEnd,
+            lineStart: u.lineStart, lineEnd: u.lineEnd,
             labelerId: labeler.id,
           });
-          // Manual axes → corrected_* with decision='accept'. An empty
-          // predictions Map binds every predicted_* (incl. the FK
-          // predicted_decision_id) to NULL, which the FK guard requires.
-          await saveClassificationLabel({
-            ruleId: newId,
-            labelerId: labeler.id,
-            corrected: {
-              prerequisites: toList(c.PREREQUISITE),
-              enforcement_mechanisms: toList(c.ENFORCEMENT),
-              triggers: toList(c.TRIGGERS),
-              ambiguity_level: c.AMBIGUITY_LEVEL || null,
-              ambiguity_notes: (c.AMBIGUITY ?? "").trim() || null,
-            },
-            predictions: new Map(),
-          });
-          let noteOk = true;
-          const snippet = ruleText.replace(/\s+/g, " ");
-          const entry = `[skipped_rule] L${c.lineStart}–${c.lineEnd} | ${(c.note ?? "").trim() || "(no note)"} | ${snippet}`;
-          try {
-            await appendMissedRuleNote({ rulesFileId: activeDoc.document_id, entry });
-          } catch (noteErr) {
-            noteOk = false;
-            setToast(`Rule added; note not saved: ${noteErr.message ?? noteErr}`);
-          }
-          if (noteOk) setToast(`Added rule from L${c.lineStart}–${c.lineEnd}`);
+          setToast(`Added rule to L${u.lineStart}–${u.lineEnd}`);
           setConfirmingAdd(null);
           setPending(null);
           window.getSelection()?.removeAllRanges();
           await loadRules();
-        } catch (err) { setToast(`add failed: ${err.message ?? err}`); }
+        } catch (err) { setToast(`add rule failed: ${err.message ?? err}`); }
       }
 
       async function saveRuleEdit(rule, next) {
@@ -3144,6 +3451,22 @@
           if (editMode?.ruleId === rule.rule_id) setEditMode(null);
           await loadRules();
         } catch (err) { setToast(`delete failed: ${err.message ?? err}`); }
+      }
+
+      // Delete a whole block: every rule in it (each cascades its own children),
+      // then the source_block row that designates/ranges it. Rules go first so
+      // nothing is left dangling.
+      async function confirmDeleteBlock(u) {
+        if (!u || !labeler) return;
+        try {
+          for (const r of u.rules) await deleteRule({ ruleId: r.rule_id });
+          if (u.blockId) await deleteSourceBlock({ blockId: u.blockId });
+          setToast(`Deleted block L${u.lineStart}–${u.lineEnd}${u.rules.length ? ` and ${u.rules.length} rule${u.rules.length === 1 ? "" : "s"}` : ""}`);
+          setDeletingBlockKey("");
+          setExpandedRuleId("");
+          setActiveUnitKey("");
+          await loadRules();
+        } catch (err) { setToast(`delete block failed: ${err.message ?? err}`); }
       }
 
       // --- Comment + block-range handlers. Each write reloads via loadRules
@@ -3368,11 +3691,17 @@
       // index means the active block is an empty one opened by a body-click and
       // not part of the paged set; Prev/Next still reach the nearest neighbors.
       const navIndex = visibleUnits.findIndex(u => u.key === activeUnitKey);
-      const canPrev = !!activeUnit && (navIndex > 0 || (navIndex < 0 && visibleUnits.some(u => u.lineStart < activeUnit.lineStart)));
-      const canNext = !!activeUnit && (navIndex >= 0 ? navIndex < visibleUnits.length - 1 : visibleUnits.some(u => u.lineStart > activeUnit.lineStart));
+      // With nothing selected, Prev/Next still work — they jump into the first /
+      // last block so the labeler can start browsing without clicking the source.
+      const canPrev = activeUnit
+        ? (navIndex > 0 || (navIndex < 0 && visibleUnits.some(u => u.lineStart < activeUnit.lineStart)))
+        : visibleUnits.length > 0;
+      const canNext = activeUnit
+        ? (navIndex >= 0 ? navIndex < visibleUnits.length - 1 : visibleUnits.some(u => u.lineStart > activeUnit.lineStart))
+        : visibleUnits.length > 0;
       const positionLabel = navIndex >= 0
         ? `Block ${navIndex + 1} of ${visibleUnits.length}`
-        : activeUnit ? "Empty block" : "—";
+        : activeUnit ? "Empty block" : (visibleUnits.length ? `${visibleUnits.length} block${visibleUnits.length === 1 ? "" : "s"}` : "—");
       // Active block's annotations: persisted comments + whether its range was
       // actually edited (rangeEdited is false for comment-only source_block rows).
       const blockCmts = activeUnit ? (blockComments.get(activeUnit.key) || []) : [];
@@ -3434,7 +3763,7 @@
             <div className="viewer-body" ref=${viewerBodyRef} onMouseUp=${onViewerMouseUp} onClick=${onViewerClick}>
               ${allLines.map(l => {
                 const isHl = highlightStart != null && l.line_number >= highlightStart && l.line_number <= highlightEnd;
-                const isRule = ruleLineSet.has(l.line_number);
+                const isRule = ruleLineSet.has(l.line_number) || sourceBlockLineSet.has(l.line_number);
                 return [
                   html`<span key=${"n" + l.line_number} className="ln">${l.line_number}</span>`,
                   html`<div key=${"c" + l.line_number} data-line-number=${String(l.line_number)}
@@ -3461,19 +3790,10 @@
             <div className="rules-panel-header">
               <div className="header-top">
                 <h2>Extracted Rules</h2>
-                <button className="add-rule-btn"
-                  onClick=${requestAddRule}
-                  title=${pending ? `Add rule from L${pending.lineStart}–${pending.lineEnd}` : "Select text in the viewer, then click Add Rule"}>
-                  <${PlusIcon} size=${14} /> Add Rule
-                </button>
               </div>
               <div className="header-meta">
                 <span>${rules.length} rule${rules.length === 1 ? "" : "s"} · ${nonEmptyUnitCount} block${nonEmptyUnitCount === 1 ? "" : "s"}</span>
-                <label className="empty-toggle">
-                  <input type="checkbox" checked=${showEmptyUnits}
-                    onChange=${e => setShowEmptyUnits(e.target.checked)} />
-                  Show empty blocks
-                </label>
+                <span className="header-hint">Select source text to add a block</span>
               </div>
             </div>
             ${activeUnit && html`
@@ -3491,6 +3811,10 @@
                       ${activeUnit.rules.filter(r => r.my_extraction_decision).length}/${activeUnit.rules.length} labeled
                     </span>
                   `}
+                  <button className="block-del-btn" title="Delete this block and all its rules" aria-label="Delete block"
+                    onClick=${() => { setBlockRangeEdit(null); setBlockCommentDraft(null); setDeletingBlockKey(activeUnit.key); }}>
+                    <${TrashIcon} size=${15} />
+                  </button>
                 </div>
                 ${blockRangeEdit?.key === activeUnit.key ? html`
                   <div className="block-range-edit">
@@ -3500,6 +3824,14 @@
                       onChange=${e => setBlockRangeEdit({ ...blockRangeEdit, end: e.target.value })} /></label>
                     <button onClick=${() => setBlockRangeEdit(null)}>Cancel</button>
                     <button className="primary" onClick=${submitBlockRange}>Save range</button>
+                  </div>
+                ` : deletingBlockKey === activeUnit.key ? html`
+                  <div className="block-delete-confirm">
+                    <span className="delete-confirm-text">Delete this block${activeUnit.rules.length ? ` and its ${activeUnit.rules.length} rule${activeUnit.rules.length === 1 ? "" : "s"}` : ""}? This can't be undone.</span>
+                    <button onClick=${() => setDeletingBlockKey("")}>Cancel</button>
+                    <button className="danger-btn" onClick=${() => confirmDeleteBlock(activeUnit)}>
+                      <${TrashIcon} size=${12} /> Delete block
+                    </button>
                   </div>
                 ` : html`
                   <div className="block-subhead-actions">
@@ -3534,18 +3866,20 @@
             <div className="rules-list" ref=${rulesListRef}>
               ${rulesLoading
                 ? html`<div className="empty-state">Loading rules…</div>`
-                : rules.length === 0
-                  ? html`<div className="empty-state">No rules in this file yet.</div>`
-                  : !activeUnit
-                    ? html`<div className="empty-state">Click a block in the source to see its rules.</div>`
-                    : activeUnit.rules.length === 0
-                      ? html`<div className="empty-state block-empty">
-                          <p>No rules extracted from this block.</p>
-                          <button className="add-rule-btn" onClick=${() => requestAddRuleForUnit(activeUnit)}>
-                            <${PlusIcon} size=${14} /> Add rule from this block
-                          </button>
-                        </div>`
-                      : activeUnit.rules.map(r => renderRuleItem(r, activeUnit.key))}
+                : !activeUnit
+                  ? html`<div className="empty-state block-empty">
+                      <p>Nothing selected.</p>
+                      <p className="empty-hint">Click a green block to see its rules, or drag-select source text to add a new block.</p>
+                    </div>`
+                  : html`
+                      ${activeUnit.rules.map(r => renderRuleItem(r, activeUnit.key))}
+                      ${activeUnit.rules.length === 0 && html`<div className="empty-state block-empty"><p>No rules in this block yet.</p></div>`}
+                      <div className="block-add-rule">
+                        <button className="add-rule-btn" onClick=${() => requestAddBlockRule(activeUnit)}>
+                          <${PlusIcon} size=${14} /> Add rule
+                        </button>
+                      </div>
+                    `}
             </div>
             <div className="block-pager">
               <button className="block-nav-btn" disabled=${!canPrev}
@@ -3564,8 +3898,8 @@
             <div className="modal-overlay" onClick=${() => setConfirmingAdd(null)}>
               <div className="modal-card" onClick=${e => e.stopPropagation()}>
                 <div className="modal-header">
-                  <h3>Add missing rule</h3>
-                  <span className="modal-sub">Lines ${confirmingAdd.lineStart}–${confirmingAdd.lineEnd} · not extracted by the agent</span>
+                  <h3>Add rule</h3>
+                  <span className="modal-sub">Lines ${confirmingAdd.lineStart}–${confirmingAdd.lineEnd} · added to this block like an extracted rule</span>
                 </div>
                 <div className="modal-body">
                   <label className="modal-field">
@@ -3574,58 +3908,21 @@
                       value=${confirmingAdd.text}
                       onChange=${e => setConfirmingAdd({ ...confirmingAdd, text: e.target.value })} />
                   </label>
-                  <label className="modal-field">
-                    <span className="modal-label">NOTE <span className="modal-hint">— logged on the source file as a skipped rule</span></span>
-                    <textarea className="modal-textarea" rows=${2}
-                      placeholder="Why did the extractor miss this? Anything reviewers should know…"
-                      value=${confirmingAdd.note}
-                      onChange=${e => setConfirmingAdd({ ...confirmingAdd, note: e.target.value })} />
-                  </label>
-                  <div className="modal-axes-title">Classification — fill what you can</div>
-                  <div className="modal-axes-grid">
-                    <label className="modal-field">
-                      <span className="modal-label">PREREQUISITES <span className="modal-hint">one per line</span></span>
-                      <textarea className="modal-textarea" rows=${2}
-                        value=${confirmingAdd.PREREQUISITE}
-                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, PREREQUISITE: e.target.value })} />
-                    </label>
-                    <label className="modal-field">
-                      <span className="modal-label">ENFORCEMENT <span className="modal-hint">one per line</span></span>
-                      <textarea className="modal-textarea" rows=${2}
-                        value=${confirmingAdd.ENFORCEMENT}
-                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, ENFORCEMENT: e.target.value })} />
-                    </label>
-                    <label className="modal-field">
-                      <span className="modal-label">TRIGGERS <span className="modal-hint">one per line</span></span>
-                      <textarea className="modal-textarea" rows=${2}
-                        value=${confirmingAdd.TRIGGERS}
-                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, TRIGGERS: e.target.value })} />
-                    </label>
-                    <label className="modal-field">
-                      <span className="modal-label">AMBIGUITY LEVEL</span>
-                      <select className="modal-select" value=${confirmingAdd.AMBIGUITY_LEVEL}
-                        onChange=${e => setConfirmingAdd({ ...confirmingAdd, AMBIGUITY_LEVEL: e.target.value })}>
-                        <option value="none">none</option>
-                        <option value="low">low</option>
-                        <option value="medium">medium</option>
-                        <option value="high">high</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label className="modal-field">
-                    <span className="modal-label">AMBIGUITY NOTES</span>
-                    <textarea className="modal-textarea" rows=${2}
-                      placeholder="What specifically is ambiguous?"
-                      value=${confirmingAdd.AMBIGUITY}
-                      onChange=${e => setConfirmingAdd({ ...confirmingAdd, AMBIGUITY: e.target.value })} />
-                  </label>
                 </div>
                 <div className="modal-actions">
                   <button onClick=${() => setConfirmingAdd(null)}>Cancel</button>
-                  <button className="primary" onClick=${confirmAddRule}>Confirm & save</button>
+                  <button className="primary" onClick=${confirmAddBlockRule}>Confirm & save</button>
                 </div>
               </div>
             </div>
+          `}
+          ${pendingAddable && html`
+            <button className="source-hint" ref=${sourceHintRef}
+              style=${{ visibility: "hidden" }}
+              onClick=${addSourceFromSelection}
+              title="Mark the selected lines as a rule source the extractor missed">
+              <${PlusIcon} size=${13} /> Add as source block · L${pending.lineStart}–${pending.lineEnd}
+            </button>
           `}
           ${toast && html`<div className="toast">${toast}</div>`}
         </main>
@@ -3821,18 +4118,20 @@
       function formatList(v) { return (v ?? []).join("\n"); }
       function parseList(v) { return (v ?? "").split("\n").map(s => s.trim()).filter(Boolean); }
 
-      // Initial draft = whatever this labeler previously committed for this
-      // rule, or empty. We intentionally do NOT fall back to the LLM
-      // prediction — that lives in its own "LLM Judge" box and pre-filling
-      // the note field with it would force every labeler to re-edit. The
-      // form remounts (via key=rule_id in the parent) when you switch
-      // rules, so useState's lazy initializer reads fresh values then.
+      // Initial draft per axis: this labeler's previously-committed correction
+      // wins; absent one, fall back to the LLM judge's prediction so the
+      // labeler starts from the model's answer and edits down (the raw
+      // prediction also still shows in its own read-only "LLM Judge" box). `??`
+      // only falls through on null/undefined, so an explicitly-saved empty
+      // correction ([] or "") is preserved and is NOT re-filled from the LLM.
+      // The form remounts (via key=rule_id in the parent) when you switch
+      // rules, so useState's lazy initializer reads a fresh prediction then.
       const initial = useMemo(() => ({
-        PREREQUISITE:    formatList(myLabel?.corrected_prerequisites          ?? []),
-        ENFORCEMENT:     formatList(myLabel?.corrected_enforcement_mechanisms ?? []),
-        TRIGGERS:        formatList(myLabel?.corrected_triggers               ?? []),
-        AMBIGUITY:       myLabel?.corrected_ambiguity_notes ?? "",
-        AMBIGUITY_LEVEL: myLabel?.corrected_ambiguity_level ?? "none",
+        PREREQUISITE:    formatList(myLabel?.corrected_prerequisites          ?? item.prediction?.prerequisites          ?? []),
+        ENFORCEMENT:     formatList(myLabel?.corrected_enforcement_mechanisms ?? item.prediction?.enforcement_mechanisms ?? []),
+        TRIGGERS:        formatList(myLabel?.corrected_triggers               ?? item.prediction?.triggers               ?? []),
+        AMBIGUITY:       myLabel?.corrected_ambiguity_notes ?? item.prediction?.ambiguity_notes ?? "",
+        AMBIGUITY_LEVEL: myLabel?.corrected_ambiguity_level ?? (item.prediction?.ambiguity_level || "none"),
       }), [item.rule_id, myLabel?.updated_at]);
       const [draft, setDraft] = useState(initial);
       // No `useEffect(setDraft(initial), [initial])` reset: polling refreshes

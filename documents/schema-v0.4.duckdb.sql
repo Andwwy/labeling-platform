@@ -163,6 +163,14 @@ CREATE TABLE source_block (
     original_line_start INTEGER NOT NULL,   -- frozen segmenter output (natural anchor)
     original_line_end   INTEGER NOT NULL,
     snippet             TEXT,
+    -- "Add block": a reviewer marks a span the extractor skipped as a rule source
+    -- (rendered green in the viewer). added_by_labeler_id is the reviewer; note is
+    -- an optional "why was this missed". NULL added_by_labeler_id = a block that
+    -- only carries a comment / range edit, not a human-designated source. The
+    -- rules the reviewer then writes for it go into the `rule` table (unified with
+    -- LLM rules); this flag is the only marker of human origin (see section 8).
+    added_by_labeler_id UUID REFERENCES labeler(id),
+    note                TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_edited_at      TIMESTAMPTZ         -- NULL until a labeler edits the range
 );
@@ -410,6 +418,17 @@ CREATE TABLE source_block_comment (
 );
 CREATE INDEX source_block_comment_block_idx   ON source_block_comment (block_id, created_at);
 CREATE INDEX source_block_comment_labeler_idx ON source_block_comment (labeler_id);
+
+-- DEPRECATED / unused: source_block_rule.
+-- Reviewer-added rules are now written into the `rule` table itself, exactly
+-- like an LLM-extracted rule (same schema, no provenance flag — indistinguishable
+-- by design). The human origin is recorded only at the BLOCK level: the rule sits
+-- in a source_block whose added_by_labeler_id is set. Export of "rules the
+-- extractor missed" = rules whose span falls in an added_by source_block. Caveat:
+-- because added rules are plain `rule` rows, a re-extraction that drops/rebuilds
+-- `rule` for a file will remove them unless the crawler preserves rows inside
+-- added_by source_blocks. (The earlier separate source_block_rule table is left
+-- in prod but no longer read or written.)
 
 -- -----------------------------------------------------------------------------
 -- 9. Ops / observability — unchanged from v0.3

@@ -364,10 +364,11 @@ Why some of the non-obvious choices got made:
   handle "rule changes mid-render" but only ever fired on polls, which
   reset whatever the labeler had just typed. See [RUNBOOK § Notes flash
   back](RUNBOOK.md#notes-flash-back).
-- **Initial note-field value does NOT fall back to the LLM
-  prediction.** The LLM output already shows in its own "LLM Judge" box
-  next to the field. Pre-filling the editable area forced labelers to
-  clear before typing. See [RUNBOOK § Notes pre-fill with LLM](RUNBOOK.md#notes-pre-fill-with-llm).
+- **Initial note-field value falls back to the LLM prediction.** When an
+  axis has no saved `corrected_*`, the editable field pre-fills from the
+  latest prediction so the labeler edits the model's answer down; a saved
+  correction (even an explicit empty one) still wins. See [RUNBOOK § Notes
+  pre-fill with LLM](RUNBOOK.md#notes-pre-fill-with-llm).
 - **Snapshot hash is computed at INSERT, never updated.** The hash
   freezes the prediction the labeler is reviewing, so a future audit
   can flag a label made against a since-changed judge prediction.

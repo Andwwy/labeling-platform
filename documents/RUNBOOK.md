@@ -314,29 +314,27 @@ Landed in `5e42121`. See `ClassificationForm` in
 
 ## Notes pre-fill with LLM
 
-**Symptom.** You open an unsaved rule on the Classification page. The
-"Your notes" textareas are already filled in with the LLM prediction
-text (e.g. ENFORCEMENT shows "regex, bash"). You have to clear it before
-typing your own.
+**Behavior (intentional).** Open an unsaved rule on the Classification
+page and the "Your notes" textareas are already filled with the latest
+`parse_ok=TRUE` LLM prediction (e.g. ENFORCEMENT shows "regex, bash").
+This is by design: the labeler reviews the model's answer and edits it
+down instead of typing from scratch. The raw prediction still shows in
+its own read-only "LLM Judge" box.
 
-**Root cause.** Initial value pulled the LLM prediction as a fallback:
-
-```js
-PREREQUISITE: formatList(myLabel?.corrected_prerequisites ?? pred?.prerequisites ?? []),
-```
-
-The intent was "if no prior save, start from LLM" — but the LLM output
-already shows in its own "LLM Judge" box. Pre-filling the editable field
-forced labelers to clear before typing.
-
-**Fix.** Drop the `pred?` fallback:
+**Precedence.** A labeler's previously-saved correction wins; the draft
+only falls back to the prediction when an axis has no saved `corrected_*`.
+`??` stops at null/undefined, so an explicitly-saved empty correction
+(`[]` or `""`) is preserved and is NOT re-filled from the LLM:
 
 ```js
-PREREQUISITE: formatList(myLabel?.corrected_prerequisites ?? []),
+PREREQUISITE: formatList(myLabel?.corrected_prerequisites ?? item.prediction?.prerequisites ?? []),
 ```
 
-The note field now starts empty for unsaved/skipped rules and pre-fills
-with the saved value if there is one. Landed in `5e42121`.
+**History.** This fallback was briefly dropped in `5e42121` (it was felt
+to force labelers to clear the field), then restored by request so
+labelers start from the LLM answer. To go back to blank fields, remove
+the `item.prediction?.…` term from the `initial` useMemo in
+`ClassificationForm`.
 
 ## Vercel shows old code
 
