@@ -1959,8 +1959,12 @@
     // --- Human annotations (comments) + source-block range overrides ---------
     // All three reads are best-effort: a failure (or a brand-new DB still
     // provisioning) returns an empty Map so the extraction panel still renders.
-    // rule_comment / source_block_comment carry VARCHAR ids (app-managed); the
-    // joins cast the prod UUID side to VARCHAR to match, same as everywhere.
+    // The live comment/source_block tables use UUID ids (created from the ideal
+    // schema, not the app's VARCHAR CREATE-IF-NOT-EXISTS fallback), so every
+    // id/key comparison casts BOTH sides to VARCHAR — binding a JS string to a
+    // UUID-typed prepared-statement parameter throws "Invalid column type",
+    // and `col::VARCHAR = ?` is the type-safe form whether the column is UUID or
+    // VARCHAR. Same pattern the prod-table reads use everywhere else.
 
     function commentRowToObj(r) {
       return {
@@ -1982,7 +1986,7 @@
     async function getRuleCommentsForDocument(documentId) {
       try {
         const rows = await evalPrepared(
-          `SELECT c.id, c.rule_id AS rule_id, c.labeler_id AS labeler_id,
+          `SELECT c.id::VARCHAR AS id, c.rule_id::VARCHAR AS rule_id, c.labeler_id::VARCHAR AS labeler_id,
                   c.body, c.created_at::VARCHAR AS created_at,
                   COALESCE(c.line_start, r.line_start) AS line_start,
                   COALESCE(c.line_end,   r.line_end)   AS line_end,
@@ -2011,8 +2015,8 @@
     async function getSourceBlockOverridesForDocument(documentId) {
       try {
         const rows = await evalPrepared(
-          `SELECT id, line_start, line_end, original_line_start, original_line_end
-           FROM source_block WHERE rules_file_id = ?`,
+          `SELECT id::VARCHAR AS id, line_start, line_end, original_line_start, original_line_end
+           FROM source_block WHERE rules_file_id::VARCHAR = ?`,
           [documentId]
         );
         const m = new Map();
@@ -2033,15 +2037,15 @@
     async function getSourceBlockCommentsForDocument(documentId) {
       try {
         const rows = await evalPrepared(
-          `SELECT c.id, c.block_id AS block_id, c.labeler_id AS labeler_id,
+          `SELECT c.id::VARCHAR AS id, c.block_id::VARCHAR AS block_id, c.labeler_id::VARCHAR AS labeler_id,
                   c.body, c.created_at::VARCHAR AS created_at,
                   b.original_line_start AS original_line_start,
                   b.original_line_end   AS original_line_end,
                   l.handle AS handle, l.display_name AS display_name
            FROM source_block_comment c
-           JOIN source_block b ON b.id = c.block_id
+           JOIN source_block b ON b.id::VARCHAR = c.block_id::VARCHAR
            LEFT JOIN labeler l ON l.id::VARCHAR = c.labeler_id
-           WHERE b.rules_file_id = ?
+           WHERE b.rules_file_id::VARCHAR = ?
            ORDER BY c.created_at`,
           [documentId]
         );
@@ -2361,15 +2365,18 @@
     async function deleteRule({ ruleId }) {
       await evalPrepared(`DELETE FROM rule_classification_label WHERE rule_id::VARCHAR = ?`, [ruleId]);
       await evalPrepared(`DELETE FROM rule_extraction_label    WHERE rule_id::VARCHAR = ?`, [ruleId]);
-      await evalPrepared(`DELETE FROM rule_comment             WHERE rule_id = ?`,          [ruleId]);
+      await evalPrepared(`DELETE FROM rule_comment             WHERE rule_id::VARCHAR = ?`, [ruleId]);
       await evalPrepared(`DELETE FROM rule_llm_decision        WHERE rule_id::VARCHAR = ?`, [ruleId]);
       await evalPrepared(`DELETE FROM rule                     WHERE id::VARCHAR = ?`, [ruleId]);
     }
 
     // --- Comment + source-block writes ---------------------------------------
-    // App-managed tables (VARCHAR ids, no FK/UNIQUE), so inserts can't trip the
-    // constraint/indexed-column hang family: every bound value is non-null, ids
-    // are generated here, and no UPDATE touches an indexed column.
+    // Inserts bind a generated UUID string and non-null values (DuckDB coerces
+    // the string into the UUID id column), so they can't trip the constraint/
+    // indexed-column hang family, and no UPDATE touches an indexed column.
+    // Every WHERE/equality bind casts the id/key column to VARCHAR (`col::VARCHAR
+    // = ?`): the live tables have UUID ids, and binding a JS string straight to a
+    // UUID-typed parameter throws "Invalid column type encountered for argument".
 
     async function addRuleComment({ ruleId, rulesFileId, lineStart, lineEnd, labelerId, body }) {
       const id = crypto.randomUUID();
@@ -2386,12 +2393,12 @@
       // table is a fixed internal literal ('rule_comment' | 'source_block_comment'),
       // never user input — safe to interpolate.
       await evalPrepared(
-        `UPDATE ${table} SET body = ?, updated_at = now() WHERE id = ?`,
+        `UPDATE ${table} SET body = ?, updated_at = now() WHERE id::VARCHAR = ?`,
         [body, id]
       );
     }
     async function deleteCommentRow({ table, id }) {
-      await evalPrepared(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      await evalPrepared(`DELETE FROM ${table} WHERE id::VARCHAR = ?`, [id]);
     }
 
     // Find-or-create the source_block row for a derived unit, keyed on its
@@ -2402,8 +2409,8 @@
     // uniqueness guard — is what keeps blocks deduplicated. Returns the block id.
     async function ensureSourceBlock({ rulesFileId, origStart, origEnd, lineStart, lineEnd, kind, snippet }) {
       const found = await evalPrepared(
-        `SELECT id FROM source_block
-         WHERE rules_file_id = ? AND original_line_start = ? AND original_line_end = ?
+        `SELECT id::VARCHAR AS id FROM source_block
+         WHERE rules_file_id::VARCHAR = ? AND original_line_start = ? AND original_line_end = ?
          LIMIT 1`,
         [rulesFileId, origStart, origEnd]
       );
@@ -2419,7 +2426,7 @@
     }
     async function updateSourceBlockRange({ blockId, lineStart, lineEnd }) {
       await evalPrepared(
-        `UPDATE source_block SET line_start = ?, line_end = ?, last_edited_at = now() WHERE id = ?`,
+        `UPDATE source_block SET line_start = ?, line_end = ?, last_edited_at = now() WHERE id::VARCHAR = ?`,
         [lineStart, lineEnd, blockId]
       );
     }
