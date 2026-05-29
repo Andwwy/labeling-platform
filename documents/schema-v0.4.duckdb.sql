@@ -372,21 +372,33 @@ CREATE INDEX rule_classification_label_decision_idx ON rule_classification_label
 --    "who said what about which rule/block" is queryable. Reads aren't filtered
 --    by labeler (internal tool) — everyone sees everyone's comments, attributed.
 --
---    These are append-style threads (own UUID PK, many per (entity, labeler)),
---    NOT a single decision row like the label tables. A labeler may edit/delete
---    their own comments (updated_at stamps edits).
+--    These are append-style threads (own UUID PK, many per entity), visible to
+--    EVERYONE (reads are never filtered by labeler), NOT a single decision row
+--    like the label tables. Any labeler may edit/delete any comment on a shared
+--    object; updated_at stamps edits.
+--
+--    Re-extraction note: the crawler drops and re-extracts rules, so rule.id is
+--    reassigned every crawl. rule_comment therefore ALSO stores a stable anchor
+--    — (rules_file_id, line_start, line_end) = the rule's source span — and the
+--    app re-links a comment to the re-extracted rule by that span, not by the
+--    ephemeral rule_id. This mirrors how source_block_comment survives via the
+--    block's original line span. rule_id is retained as the at-creation pointer.
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE rule_comment (
-    id          UUID PRIMARY KEY DEFAULT uuid(),
-    rule_id     UUID NOT NULL REFERENCES rule(id),
-    labeler_id  UUID NOT NULL REFERENCES labeler(id),
-    body        TEXT NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id            UUID PRIMARY KEY DEFAULT uuid(),
+    rule_id       UUID NOT NULL REFERENCES rule(id),  -- rule at comment time (churns on re-extract)
+    rules_file_id UUID REFERENCES rules_file(id),     -- stable anchor: the file …
+    line_start    INTEGER,                            -- … and the rule's source span,
+    line_end      INTEGER,                            -- … survive re-extraction for re-linking
+    labeler_id    UUID NOT NULL REFERENCES labeler(id),
+    body          TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX rule_comment_rule_idx    ON rule_comment (rule_id, created_at);
 CREATE INDEX rule_comment_labeler_idx ON rule_comment (labeler_id);
+CREATE INDEX rule_comment_anchor_idx  ON rule_comment (rules_file_id, line_start, line_end);
 
 CREATE TABLE source_block_comment (
     id          UUID PRIMARY KEY DEFAULT uuid(),

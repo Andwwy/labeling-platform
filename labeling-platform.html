@@ -996,6 +996,19 @@
     }
     .link-btn:hover { color: var(--accent-gold); text-decoration: underline; }
     .link-btn.danger:hover { color: var(--danger); }
+    .comment-icon-btn {
+      align-items: center;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      color: var(--fg-tertiary);
+      cursor: pointer;
+      display: inline-flex;
+      padding: 3px;
+      transition: color 0.12s ease, background 0.12s ease;
+    }
+    .comment-icon-btn:hover { background: var(--surface-primary); color: var(--accent-gold); }
+    .comment-icon-btn.danger:hover { background: var(--danger-light); color: var(--danger); }
     .block-subhead-actions {
       display: flex;
       flex-wrap: wrap;
@@ -1561,14 +1574,23 @@
     // connection forever instead of erroring, and a BLOB index would hang on
     // UPDATE. rule_id / block_id / labeler_id are the VARCHAR forms the reads
     // already cast UUIDs to. Own-id PK = an append thread (many per entity).
+    // rule_id is the rule UUID at comment time, but the crawler re-extracts
+    // rules with fresh UUIDs, so a comment keyed only on rule_id is orphaned on
+    // the next crawl. We also persist a STABLE anchor — (rules_file_id, the
+    // rule's source line span) — so comments re-link to the re-extracted rule
+    // by source location, exactly how source_block comments survive via their
+    // original line span. Reads key off this span, not the ephemeral UUID.
     const RULE_COMMENT_DDL = `
       CREATE TABLE IF NOT EXISTS rule_comment (
-        id         VARCHAR PRIMARY KEY,
-        rule_id    VARCHAR NOT NULL,
-        labeler_id VARCHAR NOT NULL,
-        body       VARCHAR NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
-        updated_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+        id            VARCHAR PRIMARY KEY,
+        rule_id       VARCHAR NOT NULL,
+        rules_file_id VARCHAR,
+        line_start    INTEGER,
+        line_end      INTEGER,
+        labeler_id    VARCHAR NOT NULL,
+        body          VARCHAR NOT NULL,
+        created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        updated_at    TIMESTAMP NOT NULL DEFAULT current_timestamp
       )
     `;
     // line_start / line_end are editable; original_line_* are the natural key we
@@ -1608,15 +1630,20 @@
     // =================================================================
     let _appConfig = null;
     let _connPromise = null;
-    // Reject (instead of hanging forever) if a connect step stalls — e.g. the
-    // MotherDuck instance is waking from idle, or a worker/network call wedged.
+    let _schemaProvisioned = false;   // boot DDL runs once per page load, not on every reconnect
+    let _opChain = Promise.resolve(); // serializes DB ops onto the single shared connection
+    const DB_OP_TIMEOUT_MS = 15000;   // a query exceeding this is treated as wedged/contended
+    const _delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Reject (instead of hanging forever) if a step stalls — e.g. the MotherDuck
+    // instance is waking from idle, a worker/network call wedged, or the database
+    // is contended because several labelers and the crawler are all writing.
     function withTimeout(promise, ms, label) {
       let timer;
       return Promise.race([
         promise,
         new Promise((_, reject) => {
           timer = setTimeout(
-            () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s (idle reconnect?). Reload to retry.`)),
+            () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s (database busy — please retry).`)),
             ms
           );
         }),
@@ -1635,50 +1662,110 @@
         const conn = MDConnection.create({ mdToken: _appConfig.MOTHERDUCK_TOKEN });
         await withTimeout(conn.isInitialized(), 30000, "MotherDuck init");
         await withTimeout(conn.evaluateQuery(`USE ${_appConfig.MOTHERDUCK_DATABASE}`), 30000, "MotherDuck connect");
-        for (const ddl of [
-          LABELER_DDL,
-          RULE_EXTRACTION_LABEL_DDL,
-          RULE_CLASSIFICATION_LABEL_DDL,
-          RULE_COMMENT_DDL,
-          SOURCE_BLOCK_DDL,
-          SOURCE_BLOCK_COMMENT_DDL,
-        ]) {
-          await withTimeout(conn.evaluateQuery(ddl), 30000, "MotherDuck schema setup");
-        }
-        // Additive migrations against prod-only pipeline tables. Each is wrapped
-        // in try/catch because a fresh *local* DuckDB has no rules_file/rule
-        // table (the pipeline tables live only in the prod MotherDuck DB) — a
-        // missing table here must not wedge boot.
-        //   • rules_file.missed_rules — the "Add Rule" flow appends a note here.
-        //   • rule.extraction_reason  — the re-extraction crawler emits a short
-        //     reason per rule; the extraction page reads it (read-only in-app).
-        //   • rule.rule_type / rule.execution_guidance — extract-v2 fields. In
-        //     prod they already exist (rule_type is an ENUM; ADD ... IF NOT EXISTS
-        //     no-ops there). The TEXT fallback only materializes on a hypothetical
-        //     older DB, where TEXT holding 'rule'/'context' reads back fine.
-        for (const [sql, label] of [
-          [`ALTER TABLE rules_file ADD COLUMN IF NOT EXISTS missed_rules TEXT`, "missed_rules migration"],
-          [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS extraction_reason TEXT`, "extraction_reason migration"],
-          [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS rule_type TEXT DEFAULT 'rule'`, "rule_type migration"],
-          [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS execution_guidance TEXT`, "execution_guidance migration"],
-        ]) {
-          try {
-            await withTimeout(conn.evaluateQuery(sql), 30000, `MotherDuck ${label}`);
-          } catch (_) { /* table absent locally — skip */ }
+        // Schema setup is idempotent (CREATE/ALTER ... IF NOT EXISTS) and only
+        // needs to run once per page load. Skipping it on auto-reconnect keeps
+        // recovery from a wedged connection fast (just create + USE).
+        if (!_schemaProvisioned) {
+          for (const ddl of [
+            LABELER_DDL,
+            RULE_EXTRACTION_LABEL_DDL,
+            RULE_CLASSIFICATION_LABEL_DDL,
+            RULE_COMMENT_DDL,
+            SOURCE_BLOCK_DDL,
+            SOURCE_BLOCK_COMMENT_DDL,
+          ]) {
+            await withTimeout(conn.evaluateQuery(ddl), 30000, "MotherDuck schema setup");
+          }
+          // Additive migrations against prod-only pipeline tables. Each is wrapped
+          // in try/catch because a fresh *local* DuckDB has no rules_file/rule
+          // table (the pipeline tables live only in the prod MotherDuck DB) — a
+          // missing table here must not wedge boot.
+          //   • rules_file.missed_rules — the "Add Rule" flow appends a note here.
+          //   • rule.extraction_reason  — the re-extraction crawler emits a short
+          //     reason per rule; the extraction page reads it (read-only in-app).
+          //   • rule.rule_type / rule.execution_guidance — extract-v2 fields. In
+          //     prod they already exist (rule_type is an ENUM; ADD ... IF NOT EXISTS
+          //     no-ops there). The TEXT fallback only materializes on a hypothetical
+          //     older DB, where TEXT holding 'rule'/'context' reads back fine.
+          for (const [sql, label] of [
+            [`ALTER TABLE rules_file ADD COLUMN IF NOT EXISTS missed_rules TEXT`, "missed_rules migration"],
+            [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS extraction_reason TEXT`, "extraction_reason migration"],
+            [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS rule_type TEXT DEFAULT 'rule'`, "rule_type migration"],
+            [`ALTER TABLE rule ADD COLUMN IF NOT EXISTS execution_guidance TEXT`, "execution_guidance migration"],
+            // rule_comment stable anchor (re-link comments across re-extraction).
+            [`ALTER TABLE rule_comment ADD COLUMN IF NOT EXISTS rules_file_id VARCHAR`, "rule_comment.rules_file_id migration"],
+            [`ALTER TABLE rule_comment ADD COLUMN IF NOT EXISTS line_start INTEGER`, "rule_comment.line_start migration"],
+            [`ALTER TABLE rule_comment ADD COLUMN IF NOT EXISTS line_end INTEGER`, "rule_comment.line_end migration"],
+          ]) {
+            try {
+              await withTimeout(conn.evaluateQuery(sql), 30000, `MotherDuck ${label}`);
+            } catch (_) { /* table absent locally — skip */ }
+          }
+          _schemaProvisioned = true;
         }
         return conn;
       })().catch(err => { _connPromise = null; throw err; });
       return _connPromise;
     }
+    // Drop the (possibly wedged) connection so the next getConnection() builds a
+    // fresh one. Schema stays provisioned, so the reconnect is just create + USE.
+    function resetConnection() { _connPromise = null; }
+
+    // Every DB call funnels through here. Three properties make the app survive
+    // ~5 concurrent labelers plus a background crawler hammering the same DB:
+    //   1. Serialized — ops run one-at-a-time on the single WASM connection, so
+    //      concurrent React handlers can't interleave queries and wedge the
+    //      worker (the old failure mode where one stuck write froze everything).
+    //   2. Timed out — a contended or hung query (incl. the DuckDB-WASM "silent
+    //      hang" family: indexed-column UPDATE, constraint violation) rejects
+    //      after DB_OP_TIMEOUT_MS instead of blocking forever.
+    //   3. Self-healing — on any failure the connection is reset, so the very
+    //      next action reconnects and works; the app never gets permanently
+    //      stuck. Callers still see the rejection and can toast/retry.
+    // `retries` extra attempts after the first, each on a fresh connection with a
+    // short backoff — lets a transiently-contended op (another labeler or the
+    // crawler briefly holding the single DB writer lock) self-heal. Callers pass
+    // retries=0 for non-idempotent writes (INSERT) so a timed-out-but-committed
+    // write is never duplicated; idempotent ops (SELECT/UPDATE/DELETE) retry.
+    function runDbOp(fn, label, retries = 0) {
+      const attempt = async (n) => {
+        let conn;
+        try {
+          conn = await getConnection();
+        } catch (err) {
+          resetConnection();
+          if (n < retries) { await _delay(600 * (n + 1)); return attempt(n + 1); }
+          throw err;
+        }
+        try {
+          return await withTimeout(Promise.resolve().then(() => fn(conn)), DB_OP_TIMEOUT_MS, label);
+        } catch (err) {
+          resetConnection();
+          if (n < retries) { await _delay(600 * (n + 1)); return attempt(n + 1); }
+          throw err;
+        }
+      };
+      const op = _opChain.then(() => attempt(0));
+      // Keep the serialization chain alive regardless of this op's outcome.
+      _opChain = op.then(() => undefined, () => undefined);
+      return op;
+    }
+
     async function evalQuery(sql) {
-      const conn = await getConnection();
-      const r = await conn.evaluateQuery(sql);
-      return r.data ? r.data.toRows() : [];
+      // evalQuery is read-only (SELECT) — safe to retry.
+      return runDbOp(async (conn) => {
+        const r = await conn.evaluateQuery(sql);
+        return r.data ? r.data.toRows() : [];
+      }, "query", 1);
     }
     async function evalPrepared(sql, params) {
-      const conn = await getConnection();
-      const r = await conn.evaluatePreparedStatement(sql, params);
-      return r.data ? r.data.toRows() : [];
+      // INSERTs are not idempotent (a committed-but-timed-out insert must not be
+      // retried into a duplicate); SELECT/UPDATE/DELETE are safe to retry once.
+      const retries = /^\s*insert/i.test(sql) ? 0 : 1;
+      return runDbOp(async (conn) => {
+        const r = await conn.evaluatePreparedStatement(sql, params);
+        return r.data ? r.data.toRows() : [];
+      }, "prepared statement", retries);
     }
 
     // =================================================================
@@ -1885,24 +1972,34 @@
       };
     }
 
-    // Map(rule_id -> [comment]) for every rule in a file, oldest first.
+    // Map("lineStart-lineEnd" -> [comment]) for every rule comment in a file,
+    // oldest first. Keyed by the rule's SOURCE SPAN (stable across re-extraction)
+    // rather than the rule UUID (reassigned each crawl). A comment matches if its
+    // persisted file anchor matches the file, OR (for comments written before the
+    // anchor existed) its rule still resolves to the file — COALESCE then prefers
+    // the persisted span and falls back to the live rule's span. This is what
+    // lets everyone keep seeing a rule's comments after the crawler re-extracts.
     async function getRuleCommentsForDocument(documentId) {
       try {
         const rows = await evalPrepared(
           `SELECT c.id, c.rule_id AS rule_id, c.labeler_id AS labeler_id,
                   c.body, c.created_at::VARCHAR AS created_at,
+                  COALESCE(c.line_start, r.line_start) AS line_start,
+                  COALESCE(c.line_end,   r.line_end)   AS line_end,
                   l.handle AS handle, l.display_name AS display_name
            FROM rule_comment c
-           JOIN rule r ON r.id::VARCHAR = c.rule_id
+           LEFT JOIN rule r ON r.id::VARCHAR = c.rule_id
            LEFT JOIN labeler l ON l.id::VARCHAR = c.labeler_id
-           WHERE r.rules_file_id::VARCHAR = ?
+           WHERE c.rules_file_id::VARCHAR = ? OR r.rules_file_id::VARCHAR = ?
            ORDER BY c.created_at`,
-          [documentId]
+          [documentId, documentId]
         );
         const m = new Map();
-        for (const r of rows) {
-          if (!m.has(r.rule_id)) m.set(r.rule_id, []);
-          m.get(r.rule_id).push(commentRowToObj(r));
+        for (const row of rows) {
+          if (row.line_start == null || row.line_end == null) continue;
+          const key = `${Number(row.line_start)}-${Number(row.line_end)}`;
+          if (!m.has(key)) m.set(key, []);
+          m.get(key).push(commentRowToObj(row));
         }
         return m;
       } catch (_) { return new Map(); }
@@ -2274,11 +2371,14 @@
     // constraint/indexed-column hang family: every bound value is non-null, ids
     // are generated here, and no UPDATE touches an indexed column.
 
-    async function addRuleComment({ ruleId, labelerId, body }) {
+    async function addRuleComment({ ruleId, rulesFileId, lineStart, lineEnd, labelerId, body }) {
       const id = crypto.randomUUID();
+      // Persist the stable (file, source-span) anchor alongside the UUID so the
+      // comment re-links to the rule after the crawler re-extracts it.
       await evalPrepared(
-        `INSERT INTO rule_comment (id, rule_id, labeler_id, body) VALUES (?, ?, ?, ?)`,
-        [id, ruleId, labelerId, body]
+        `INSERT INTO rule_comment (id, rule_id, rules_file_id, line_start, line_end, labeler_id, body)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, ruleId, rulesFileId ?? null, lineStart ?? null, lineEnd ?? null, labelerId, body]
       );
       return id;
     }
@@ -3045,8 +3145,17 @@
         if (!ruleCommentDraft || !labeler) return;
         const body = (ruleCommentDraft.text ?? "").trim();
         if (!body) { setToast("Comment can't be empty."); return; }
+        // Capture the rule's stable anchor (file + source span) so the comment
+        // survives the next re-extraction, which reassigns the rule's UUID.
+        const r = rules.find(x => x.rule_id === ruleCommentDraft.ruleId);
         try {
-          await addRuleComment({ ruleId: ruleCommentDraft.ruleId, labelerId: labeler.id, body });
+          await addRuleComment({
+            ruleId: ruleCommentDraft.ruleId,
+            rulesFileId: r?.rules_file_id ?? activeDoc?.document_id ?? null,
+            lineStart: r?.line_start ?? null,
+            lineEnd: r?.line_end ?? null,
+            labelerId: labeler.id, body,
+          });
           setRuleCommentDraft(null);
           await loadRules();
         } catch (err) { setToast(`comment failed: ${err.message ?? err}`); }
@@ -3113,7 +3222,6 @@
         return html`
           <div className="comment-list">
             ${list.map(c => {
-              const mine = c.labeler_id === labeler?.id;
               const isEd = editingComment?.id === c.id;
               return html`
                 <div key=${c.id} className="comment-item">
@@ -3130,14 +3238,16 @@
                     </div>
                   ` : html`
                     <p className="comment-body">${c.body}</p>
-                    ${mine && html`
-                      <div className="comment-actions">
-                        <button className="link-btn"
-                          onClick=${() => setEditingComment({ table, id: c.id, text: c.body })}>Edit</button>
-                        <button className="link-btn danger"
-                          onClick=${() => removeComment(table, c.id)}>Delete</button>
-                      </div>
-                    `}
+                    <div className="comment-actions">
+                      <button className="comment-icon-btn" title="Edit comment" aria-label="Edit comment"
+                        onClick=${() => setEditingComment({ table, id: c.id, text: c.body })}>
+                        <${PenLineIcon} size=${13} />
+                      </button>
+                      <button className="comment-icon-btn danger" title="Delete comment" aria-label="Delete comment"
+                        onClick=${() => removeComment(table, c.id)}>
+                        <${TrashIcon} size=${13} />
+                      </button>
+                    </div>
                   `}
                 </div>
               `;
@@ -3152,7 +3262,9 @@
       const renderRuleItem = (r, unitKey) => {
         const isExpanded = r.rule_id === expandedRuleId;
         const isEditing = editMode?.ruleId === r.rule_id;
-        const cmts = commentsByRule.get(r.rule_id) || [];
+        // Comments are keyed by source span (stable across re-extraction), not
+        // the rule UUID — see getRuleCommentsForDocument.
+        const cmts = commentsByRule.get(`${r.line_start}-${r.line_end}`) || [];
         return html`
           <div key=${r.rule_id} data-rule-id=${r.rule_id}
                className=${`rule-item${isExpanded ? " expanded" : ""}`}
